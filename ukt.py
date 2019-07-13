@@ -183,14 +183,21 @@ class Ctx(object):
         self.pool.checkin(self.sock)
 
 
+struct_hi = struct.Struct('>HI')
+struct_i = struct.Struct('>I')
+struct_ii = struct.Struct('>II')
+struct_dbkvxt = struct.Struct('>HIIq')
+
+
 class Protocol(object):
     def __init__(self, host='127.0.0.1', port=1978, decode_keys=True,
                  encode_value=None, decode_value=None, timeout=None,
-                 max_age=3600):
+                 max_age=3600, default_db=0):
         self.pool = Pool(host, port, timeout, max_age)
         self.decode_keys = decode_keys
         self.encode_value = encode_value or encode
         self.decode_value = decode_value or decode
+        self.default_db = default_db
 
     @contextmanager
     def ctx(self):
@@ -202,6 +209,15 @@ class Protocol(object):
         finally:
             self.pool.checkin(sock)
 
+    def check_error(self, sock, magic):
+        bmagic = sock.recv(1)
+        if bmagic == magic:
+            return
+        elif bmagic == ERROR:
+            raise ProtocolError('Internal server error processing request.')
+        else:
+            raise ServerError('Unexpected server response: %r' % bmagic)
+
     def get_bulk(self, keys, db=None, decode_values=True):
         """
         Get multiple key/value pairs in a single request.
@@ -212,7 +228,37 @@ class Protocol(object):
         :return: a dict of key, value for matching records.
         """
         with self.ctx() as sock:
-            pass
+            if db is None:
+                db = self.default_db
+
+            buf = io.BytesIO()
+            buf.write(GET_BULK)
+            buf.write(b'\x00\x00\x00\x00')  # No flags.
+            buf.write(struct_i.pack(len(keys)))
+
+            for key in keys:
+                bkey = encode(key)
+                buf.write(struct_hi.pack(db, len(bkey)))
+                buf.write(bkey)
+
+            sock.send(buf.getvalue())
+
+            # Check the response status.
+            self.check_error(sock, GET_BULK)
+
+            accum = {}
+            n_items, = struct_i.unpack(sock.recv(4))
+            for i in range(n_items):
+                _, klen, vlen, _ = struct_dbkvxt.unpack(sock.recv(18))
+                key = sock.recv(klen)
+                value = sock.recv(vlen)
+                if self.decode_keys:
+                    key = decode(key)
+                if decode_values:
+                    value = self.decode_value(value)
+                accum[key] = value
+
+        return accum
 
     def get_bulk_details(self, db_key_list, decode_values=True):
         """
@@ -223,7 +269,34 @@ class Protocol(object):
         :return: a list of (db, key, value, xt) tuples.
         """
         with self.ctx() as sock:
-            pass
+            buf = io.BytesIO()
+            buf.write(GET_BULK)
+            buf.write(b'\x00\x00\x00\x00')  # No flags.
+            buf.write(struct_i.pack(len(db_key_list)))
+
+            for db, key in db_key_list:
+                bkey = encode(key)
+                buf.write(struct_hi.pack(db, len(bkey)))
+                buf.write(bkey)
+
+            sock.send(buf.getvalue())
+
+            # Check the response status.
+            self.check_error(sock, GET_BULK)
+
+            accum = []
+            n_items, = struct_i.unpack(sock.recv(4))
+            for i in range(n_items):
+                db, klen, vlen, xt = struct.dbkvxt.unpack(sock.recv(18))
+                key = sock.recv(klen)
+                value = sock.recv(vlen)
+                if self.decode_keys:
+                    key = decode(key)
+                if decode_values:
+                    value = self.decode_value(value)
+                accum.append((db, key, value, xt))
+
+        return accum
 
     def get(self, key, db=None, decode_value=True):
         """
@@ -252,7 +325,32 @@ class Protocol(object):
         :return: number of records written.
         """
         with self.ctx() as sock:
-            pass
+            if db is None:
+                db = self.default_db
+            if expire_time is None:
+                expire_time = EXPIRE
+
+            buf = io.BytesIO()
+            buf.write(SET_BULK)
+            buf.write(struct_i.pack(NO_REPLY if no_reply else 0))
+            buf.write(struct_i.pack(len(data)))
+
+            for key, value in data.items():
+                bkey = encode(key)
+                if encode_values:
+                    bval = self.encode_value(value)
+                else:
+                    bval = encode(value)
+                buf.write(struct_dbkvxt.pack(db, len(bkey), len(bval),
+                                             expire_time))
+                buf.write(bkey)
+                buf.write(bval)
+
+            sock.send(buf.getvalue())
+            if not no_reply:
+                self.check_error(sock, SET_BULK)
+                result, = struct_i.unpack(sock.recv(4))
+                return result
 
     def set_bulk_details(self, data, no_reply=False, encode_values=True):
         """
@@ -265,7 +363,26 @@ class Protocol(object):
         :return: number of records written.
         """
         with self.ctx() as sock:
-            pass
+            buf = io.BytesIO()
+            buf.write(SET_BULK)
+            buf.write(struct_i.pack(NO_REPLY if no_reply else 0))
+            buf.write(struct_i.pack(len(data)))
+
+            for db, key, value, xt in data.items():
+                bkey = encode(key)
+                if encode_values:
+                    bval = self.encode_value(value)
+                else:
+                    bval = encode(value)
+                buf.write(struct_dbkvxt.pack(db, len(bkey), len(bval), xt))
+                buf.write(bkey)
+                buf.write(bval)
+
+            sock.send(buf.getvalue())
+            if not no_reply:
+                self.check_error(sock, SET_BULK)
+                result, = struct_i.unpack(sock.recv(4))
+                return result
 
     def set(self, key, value, db=None, expire_time=None, no_reply=False,
             encode_value=True):
@@ -282,7 +399,23 @@ class Protocol(object):
         :return: number of records removed.
         """
         with self.ctx() as sock:
-            pass
+            if db is None:
+                db = self.default_db
+
+            buf = io.BytesIO()
+            buf.write(REMOVE_BULK)
+            buf.write(struct_i.pack(NO_REPLY if no_reply else 0))
+            buf.write(struct_i.pack(len(keys)))
+            for key in keys:
+                bkey = encode(key)
+                buf.write(struct_hi.pack(db, len(bkey)))
+                buf.write(bkey)
+
+            sock.send(buf.getvalue())
+            if not no_reply:
+                self.check_error(sock, REMOVE_BULK)
+                result, = struct_i.unpack(sock.recv(4))
+                return result
 
     def remove_bulk_details(self, db_key_list, no_reply=False):
         """
@@ -293,7 +426,20 @@ class Protocol(object):
         :return: number of records removed.
         """
         with self.ctx() as sock:
-            pass
+            buf = io.BytesIO()
+            buf.write(REMOVE_BULK)
+            buf.write(struct_i.pack(NO_REPLY if no_reply else 0))
+            buf.write(struct_i.pack(len(keys)))
+            for db, key in db_key_list:
+                bkey = encode(key)
+                buf.write(struct_hi.pack(db, len(bkey)))
+                buf.write(bkey)
+
+            sock.send(buf.getvalue())
+            if not no_reply:
+                self.check_error(sock, REMOVE_BULK)
+                result, = struct_i.unpack(sock.recv(4))
+                return result
 
     def remove(self, key, db=None, no_reply=False):
         """
@@ -318,5 +464,43 @@ class Protocol(object):
         :param bool decode_values: deserialize values after reading result.
         :return: dictionary of key/value pairs returned by the lua function.
         """
+        flags = NO_REPLY if no_reply else 0
+        bname = encode(name)
+        data = data or {}
+
         with self.ctx() as sock:
-            pass
+            buf = io.BytesIO()
+            buf.write(PLAY_SCRIPT)
+            buf.write(struct.pack('>III', flags, len(bname), len(data)))
+            buf.write(bname)
+
+            for key, value in data.items():
+                bkey = encode(key)
+                if encode_values:
+                    bval = self.encode_value(value)
+                else:
+                    bval = encode(value)
+
+                buf.write(struct_ii.pack(len(bkey), len(bval)))
+                buf.write(bkey)
+                buf.write(bval)
+
+            sock.send(buf.getvalue())
+
+            if no_reply:
+                return
+
+            self.check_error(sock, PLAY_SCRIPT)
+            accum = {}
+            n_items, = struct_i.unpack(sock.recv(4))
+            for i in range(n_items):
+                klen, vlen = struct_ii.unpack(sock.recv(8))
+                key = sock.recv(klen)
+                value = sock.recv(vlen)
+                if self.decode_keys:
+                    key = decode(key)
+                if decode_values:
+                    value = self.decode_value(value)
+                accum[key] = value
+
+        return accum
