@@ -1,8 +1,24 @@
+from base64 import b64decode
+from base64 import b64encode
 from contextlib import contextmanager
+from functools import partial
+try:
+    from http.client import HTTPConnection
+    from urllib.parse import quote_from_bytes
+    from urllib.parse import unquote_to_bytes
+    from urllib.parse import urlencode
+except ImportError:
+    from httplib import HTTPConnection
+    from urllib import quote as quote_from_bytes
+    from urllib import unquote as unquote_to_bytes
+    from urllib import urlencode
+import datetime
 import heapq
 import io
+import itertools
 import socket
 import struct
+import sys
 import time
 
 
@@ -36,6 +52,17 @@ def decode(s):
         return s
     elif s is not None:
         return str(s)
+
+
+quote_b = partial(quote_from_bytes, safe='')
+unquote_b = partial(unquote_to_bytes)
+
+
+def decode_from_content_type(content_type):
+    if content_type.endswith('colenc=B'):
+        return b64decode
+    elif content_type.endswith('colenc=U'):
+        return unquote_b
 
 
 READSIZE = 1024 * 4
@@ -123,8 +150,13 @@ class Pool(object):
         self.port = port
         self.timeout = timeout
         self.max_age = max_age or 3600
+
+        # We keep two sets of sockets around - one for the binary protocol, and
+        # another for the HTTP protocol.
         self.in_use = set()
         self.free = []
+        self.in_use_http = set()
+        self.free_http = []
 
     def create_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -134,53 +166,58 @@ class Pool(object):
         sock.connect((self.host, self.port))
         return Socket(sock)
 
-    def checkout(self):
+    def create_http_client(self):
+        conn = HTTPConnection(self.host, self.port, timeout=self.timeout)
+        conn.connect()
+        return conn
+
+    def checkout(self, http=False):
+        if http:
+            free_list = self.free_http
+            in_use = self.in_use_http
+            constructor = self.create_http_client
+        else:
+            free_list = self.free
+            in_use = self.in_use
+            constructor = self.create_socket
+
         threshold = time.time() - self.max_age
-        while self.free:
-            ts, sock = heapq.heappop(self.free)
+        while free_list:
+            ts, sock = heapq.heappop(free_list)
             if ts > threshold:
-                self.in_use.add(sock)
+                in_use.add(sock)
                 return sock
             else:
                 sock.close()
 
-        sock = self.create_socket()
-        self.in_use.add(sock)
+        sock = constructor()
+        in_use.add(sock)
         return sock
 
-    def checkin(self, sock):
-        self.in_use.remove(sock)
-        if not sock.is_closed:
-            heapq.heappush(self.free, (time.time(), sock))
+    def checkin(self, sock, http=False):
+        if http:
+            self.in_use_http.remove(sock)
+            if sock.sock is not None:
+                heapq.heappush(self.free_http, (time.time(), sock))
+        else:
+            self.in_use.remove(sock)
+            if not sock.is_closed:
+                heapq.heappush(self.free, (time.time(), sock))
 
     def close(self):
         n = 0
-        while self.free:
-            _, sock = self.free.pop()
+        all_sockets = itertools.chain(self.free, self.free_http,
+                                      self.in_use, self.in_use_http)
+        for sock in all_sockets:
             sock.close()
             n += 1
 
-        tmp, self.in_use = self.in_use, set()
-        for sock in tmp:
-            sock.close()
-            n += 1
+        self.free = []
+        self.free_http = []
+        self.in_use = set()
+        self.in_use_http = set()
 
         return n
-
-
-class Ctx(object):
-    __slots__ = ('pool', 'sock')
-
-    def __init__(self, pool):
-        self.pool = pool
-        self.sock = None
-
-    def __enter__(self):
-        self.sock = self.pool.checkout()
-        return self.sock
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.pool.checkin(self.sock)
 
 
 struct_hi = struct.Struct('>HI')
@@ -189,7 +226,10 @@ struct_ii = struct.Struct('>II')
 struct_dbkvxt = struct.Struct('>HIIq')
 
 
-class Protocol(object):
+class KyotoTycoon(object):
+    _content_type = 'text/tab-separated-values; colenc=B'
+    _cursor_id = 0
+
     def __init__(self, host='127.0.0.1', port=1978, decode_keys=True,
                  encode_value=None, decode_value=None, timeout=None,
                  max_age=3600, default_db=0):
@@ -198,16 +238,21 @@ class Protocol(object):
         self.encode_value = encode_value or encode
         self.decode_value = decode_value or decode
         self.default_db = default_db
+        self._prefix = '/rpc'
+        self._headers = {'Content-Type': self._content_type}
+
+    def set_database(self, db=0):
+        self.default_db = db
 
     @contextmanager
-    def ctx(self):
-        sock = self.pool.checkout()
+    def ctx(self, http=False):
+        sock = self.pool.checkout(http)
         try:
             yield sock
         except socket.error:
             sock.close()
         finally:
-            self.pool.checkin(sock)
+            self.pool.checkin(sock, http)
 
     def check_error(self, sock, magic):
         bmagic = sock.recv(1)
@@ -386,6 +431,17 @@ class Protocol(object):
 
     def set(self, key, value, db=None, expire_time=None, no_reply=False,
             encode_value=True):
+        """
+        Set a single key/value pair.
+
+        :param key: key.
+        :param value: value to store.
+        :param int db: database index.
+        :param long expire_time: expire time in seconds from now.
+        :param bool no_reply: do not receive a response.
+        :param bool encode_value: serialize value before writing.
+        :return: number of records written (1).
+        """
         return self.set_bulk({key: value}, db, expire_time, no_reply,
                              encode_value)
 
@@ -504,3 +560,643 @@ class Protocol(object):
                 accum[key] = value
 
         return accum
+
+    # HTTP helpers.
+
+    def _encode_keys_values(self, data):
+        accum = []
+        for key, value in data.items():
+            bkey = encode(key)
+            bval = encode(value)
+            accum.append(b'%s\t%s' % (b64encode(bkey), b64encode(bval)))
+        return b'\n'.join(accum)
+
+    def _encode_keys(self, keys):
+        accum = []
+        for key in keys:
+            accum.append(b'%s\t' % b64encode(b'_' + encode(key)))
+        return b'\n'.join(accum)
+
+    def _decode_response(self, tsv, content_type, decode_keys=None):
+        if decode_keys is None:
+            decode_keys = self.decode_keys
+        decoder = decode_from_content_type(content_type)
+        accum = {}
+        for line in tsv.split(b'\n'):
+            try:
+                key, value = line.split(b'\t', 1)
+            except ValueError:
+                continue
+
+            if decoder is not None:
+                key, value = decoder(key), decoder(value)
+
+            if decode_keys:
+                key = decode(key)
+            accum[key] = value
+
+        return accum
+
+    def _request(self, path, data, db=None, allowed_status=None, atomic=False,
+                 decode_keys=None):
+        if isinstance(data, dict):
+            body = self._encode_keys_values(data)
+        elif isinstance(data, list):
+            body = self._encode_keys(data)
+        else:
+            body = data
+
+        prefix = {}
+        if db is not False:
+            prefix['DB'] = self.default_db if db is None else db
+        if atomic:
+            prefix['atomic'] = ''
+
+        if prefix:
+            db_data = self._encode_keys_values(prefix)
+            if body:
+                body = b'\n'.join((db_data, body))
+            else:
+                body = db_data
+
+        with self.ctx(http=True) as conn:
+            try:
+                conn.request('POST', self._prefix + path, body, self._headers)
+                response = conn.getresponse()
+                content = response.read()
+                content_type = response.getheader('content-type')
+                status = response.status
+            except Exception as exc:
+                conn.close()
+                raise
+
+        if status != 200:
+            if allowed_status is None or status not in allowed_status:
+                raise ProtocolError('protocol error [%s]' % status)
+
+        data = self._decode_response(content, content_type, decode_keys)
+        return data, status
+
+    # HTTP API.
+
+    def report(self):
+        """
+        Request report from the server.
+
+        :return: a dictionary of metadata about the server state.
+        """
+        resp, status = self._request('/report', {}, None)
+        return resp
+
+    def status(self, db=None):
+        """
+        Request status from the server for the given database.
+
+        :param int db: database index.
+        :return: a dictionary of metadata about the database.
+        """
+        resp, status = self._request('/status', {}, db, decode_keys=True)
+        return resp
+
+    def clear(self, db=None):
+        """
+        Remove all data from the database.
+
+        :param int db: database index.
+        :return: boolean indicating success.
+        """
+        resp, status = self._request('/clear', {}, db)
+        return status == 200
+
+    def synchronize(self, hard=False, command=None, db=None):
+        """
+        Synchronize all data to disk.
+
+        :param bool hard: perform a hard sync.
+        :param str command: command to execute after synchronization.
+        :param int db: database index.
+        :return: boolean indicating success.
+        """
+        data = {}
+        if hard:
+            data['hard'] = ''
+        if command is not None:
+            data['command'] = command
+        _, status = self._request('/synchronize', data, db)
+        return status == 200
+
+    def _simple_write(self, cmd, key, value, db=None, expire_time=None,
+                      encode_value=True):
+        if encode_value:
+            value = self.encode_value(value)
+        data = {'key': key, 'value': value}
+        if expire_time is not None:
+            data['xt'] = str(expire_time)
+        resp, status = self._request('/%s' % cmd, data, db, (450,))
+        return status != 450
+
+    def add(self, key, value, db=None, expire_time=None, encode_value=True):
+        """
+        Add a single key/value pair without overwriting an existing key.
+
+        :param key: key.
+        :param value: value to store.
+        :param int db: database index.
+        :param long expire_time: expire time in seconds from now.
+        :param bool encode_value: serialize value before writing.
+        :return: True on success.
+        """
+        return self._simple_write('add', key, value, db, expire_time,
+                                  encode_value)
+
+    def replace(self, key, value, db=None, expire_time=None,
+                encode_value=True):
+        """
+        Replace a single key/value pair without creating a new key.
+
+        :param key: key.
+        :param value: value to store.
+        :param int db: database index.
+        :param long expire_time: expire time in seconds from now.
+        :param bool encode_value: serialize value before writing.
+        :return: True on success.
+        """
+        return self._simple_write('replace', key, value, db, expire_time,
+                                  encode_value)
+
+    def append(self, key, value, db=None, expire_time=None, encode_value=True):
+        """
+        Append data to the value of a given key pair.
+
+        :param key: key.
+        :param value: value to append..
+        :param int db: database index.
+        :param long expire_time: expire time in seconds from now.
+        :param bool encode_value: serialize value before writing.
+        :return: True on success.
+        """
+        return self._simple_write('append', key, value, db, expire_time,
+                                  encode_value)
+
+    def increment(self, key, n=1, orig=None, db=None, expire_time=None):
+        """
+        Atomically increment the value stored in the given key.
+
+        :param key: key.
+        :param int n: amount to increment by.
+        :param int orig: original value if key does not exist.
+        :param int db: database index.
+        :param long expire_time: expire time in seconds from now.
+        :return: value after increment.
+        """
+        data = {'key': key, 'num': str(n)}
+        if orig is not None:
+            data['orig'] = str(orig)
+        if expire_time is not None:
+            data['xt'] = str(expire_time)
+        resp, status = self._request('/increment', data, db, decode_keys=False)
+        return int(resp[b'num'])
+
+    def increment_double(self, key, n=1, orig=None, db=None, expire_time=None):
+        """
+        Atomically increment a double-precision value stored in the given key.
+
+        :param key: key.
+        :param float n: amount to increment by.
+        :param float orig: original value if key does not exist.
+        :param int db: database index.
+        :param long expire_time: expire time in seconds from now.
+        :return: value after increment.
+        """
+        data = {'key': key, 'num': str(n)}
+        if orig is not None:
+            data['orig'] = str(orig)
+        if expire_time is not None:
+            data['xt'] = str(expire_time)
+        resp, status = self._request('/increment_double', data, db,
+                                     decode_keys=False)
+        return float(resp[b'num'])
+
+    def cas(self, key, old_val, new_val, db=None, expire_time=None,
+            encode_value=True):
+        """
+        Perform an atomic compare-and-set.
+
+        :param key: key.
+        :param old_val: original value in database.
+        :param new_val: new value for key.
+        :param int db: database index.
+        :param long expire_time: expire time in seconds from now.
+        :param bool encode_value: serialize value before writing.
+        :return: True on success.
+        """
+        if old_val is None and new_val is None:
+            raise ValueError('old value and/or new value must be specified.')
+
+        data = {'key': key}
+        if old_val is not None:
+            if encode_value:
+                old_val = self.encode_value(old_val)
+            data['oval'] = old_val
+        if new_val is not None:
+            if encode_value:
+                new_val = self.encode_value(new_val)
+            data['nval'] = new_val
+        if expire_time is not None:
+            data['xt'] = str(expire_time)
+
+        resp, status = self._request('/cas', data, db, (450,))
+        return status != 450
+
+    def check(self, key, db=None):
+        """
+        Test if the given key exists.
+
+        :param key: key to check.
+        :param int db: database index.
+        :return: True if key exists.
+        """
+        resp, status = self._request('/check', {'key': key}, db, (450,))
+        return status != 450
+
+    def length(self, key, db=None):
+        """
+        Get the length of the value stored in the given key.
+
+        :param key: key to check.
+        :param int db: database index.
+        :return: length of value or None if key does not exist.
+        """
+        resp, status = self._request('/check', {'key': key}, db, (450,),
+                                     decode_keys=False)
+        if status == 200:
+            return int(resp[b'vsiz'])
+
+    def seize(self, key, db=None, decode_value=True):
+        """
+        Atomic get and delete for a given key.
+
+        :param key: key to pop.
+        :param int db: database index.
+        :param bool decode_value: deserialize the value after reading.
+        :return: value from database.
+        """
+        resp, status = self._request('/seize', {'key': key}, db, (450,),
+                                     decode_keys=False)
+        if status == 450:
+            return
+        value = resp[b'value']
+        if decode_value:
+            value = self.decode_value(value)
+        return value
+
+    def vacuum(self, step=0, db=None):
+        """
+        Vacuum the database.
+
+        :param int step: step increment.
+        :param int db: database index.
+        :return: True on success.
+        """
+        # If step > 0, the whole region is scanned.
+        data = {'step': str(step)} if step > 0 else {}
+        resp, status = self._request('/vacuum', data, db)
+        return status == 200
+
+    def _do_bulk_command(self, cmd, params, db=None, decode_values=True, **kw):
+        resp, status = self._request(cmd, params, db, **kw)
+
+        n = resp.pop('num' if self._decode_keys else b'num')
+        if n == b'0':
+            return {}
+
+        accum = {}
+        for key, value in resp.items():
+            if decode_values:
+                value = self.decode_value(value)
+            accum[key[1:]] = value
+        return accum
+
+    def _do_bulk_sorted_command(self, cmd, params, db=None):
+        results = self._do_bulk_command(cmd, params, db, decode_values=False)
+        return sorted(results, key=lambda k: int(results[k]))
+
+    def match_prefix(self, prefix, max_keys=None, db=None):
+        """
+        Return sorted list of keys that match the given prefix.
+
+        :param str prefix: key prefix.
+        :param int max_keys: maximum number of keys to return.
+        :param int db: database index.
+        :return: a sorted list of matching keys.
+        """
+        data = {'prefix': prefix}
+        if max_keys is not None:
+            data['max'] = str(max_keys)
+        return self._do_bulk_sorted_command('/match_prefix', data, db)
+
+    def match_regex(self, regex, max_keys=None, db=None):
+        """
+        Return sorted list of keys that match the given regex.
+
+        :param str regex: key regular expression.
+        :param int max_keys: maximum number of keys to return.
+        :param int db: database index.
+        :return: a sorted list of matching keys.
+        """
+        data = {'regex': regex}
+        if max_keys is not None:
+            data['max'] = str(max_keys)
+        return self._do_bulk_sorted_command('/match_regex', data, db)
+
+    def match_similar(self, origin, distance=None, max_keys=None, db=None):
+        """
+        Return sorted list of keys that are within a given edit distance from
+        a string.
+
+        :param str origin: source string.
+        :param int distance: maximum edit distance.
+        :param int max_keys: maximum number of keys to return.
+        :param int db: database index.
+        :return: a sorted list of matching keys.
+        """
+        data = {'origin': origin, 'utf': 'true'}
+        if distance is not None:
+            data['range'] = str(distance)
+        if max_keys is not None:
+            data['max'] = str(max_keys)
+        return self._do_bulk_sorted_command('/match_similar', data, db)
+
+    def _cursor_command(self, cmd, cursor_id, data, db=None):
+        data['CUR'] = cursor_id
+        resp, status = self._request('/%s' % cmd, data, db, (450, 501),
+                                    decode_keys=False)
+        if status == 501:
+            raise NotImplementedError('%s is not supported' % cmd)
+        return resp, status
+
+    def cur_jump(self, cursor_id, key=None, db=None):
+        data = {'key': key} if key else {}
+        resp, s = self._cursor_command('cur_jump', cursor_id, data, db)
+        return s == 200
+
+    def cur_jump_back(self, cursor_id, key=None, db=None):
+        data = {'key': key} if key else {}
+        resp, s = self._cursor_command('cur_jump_back', cursor_id, data, db)
+        return s == 200
+
+    def cur_step(self, cursor_id):
+        resp, status = self._cursor_command('cur_step', cursor_id, {})
+        return status == 200
+
+    def cur_step_back(self, cursor_id):
+        resp, status = self._cursor_command('cur_step_back', cursor_id, {})
+        return status == 200
+
+    def cur_set_value(self, cursor_id, value, step=False, expire_time=None,
+                      encode_value=True):
+        if encode_value:
+            value = self.encode_value(value)
+        data = {'value': value}
+        if expire_time is not None:
+            data['xt'] = str(expire_time)
+        if step:
+            data['step'] = ''
+        resp, status = self._cursor_command('cur_set_value', cursor_id, data)
+        return status == 200
+
+    def cur_remove(self, cursor_id):
+        resp, status = self._cursor_command('cur_remove', cursor_id, {})
+        return status == 200
+
+    def cur_get_key(self, cursor_id, step=False):
+        data = {'step': ''} if step else {}
+        resp, status = self._cursor_command('cur_get_key', cursor_id, data)
+        if status == 450:
+            return
+        key = resp[b'key']
+        if self._decode_keys:
+            key = decode(key)
+        return key
+
+    def cur_get_value(self, cursor_id, step=False, decode_value=True):
+        data = {'step': ''} if step else {}
+        resp, status = self._cursor_command('cur_get_value', cursor_id, data)
+        if status == 450:
+            return
+        value = resp[b'value']
+        if decode_value:
+            value = self.decode_value(value)
+        return value
+
+    def cur_get(self, cursor_id, step=False, decode_value=True):
+        data = {'step': ''} if step else {}
+        resp, status = self._cursor_command('cur_get', cursor_id, data)
+        if status == 450:
+            return
+        key = resp[b'key']
+        if self._decode_keys:
+            key = decode(key)
+        value = resp[b'value']
+        if decode_value:
+            value = self.decode_value(value)
+        return (key, value)
+
+    def cur_seize(self, cursor_id, step=False, decode_value=True):
+        resp, status = self._cursor_command('cur_seize', cursor_id, {})
+        if status == 450:
+            return
+        key = resp[b'key']
+        if self._decode_keys:
+            key = decode(key)
+        value = resp[b'value']
+        if decode_value:
+            value = self.decode_value(value)
+        return (key, value)
+
+    def cur_delete(self, cursor_id):
+        resp, status = self._cursor_command('cur_delete', cursor_id, {})
+        return status == 200
+
+    def cursor(self, cursor_id=None, db=None):
+        """
+        Obtain a cursor for iterating over the database.
+
+        :param int cursor_id: optional ID for cursor.
+        :param int db: database index.
+        :return: a :py:class:`Cursor`.
+        """
+        if cursor_id is None:
+            KyotoTycoon._cursor_id += 1
+            cursor_id = KyotoTycoon._cursor_id
+        return Cursor(self, cursor_id, db)
+
+    def ulog_list(self):
+        resp, status = self._request('/ulog_list', {}, None, decode_keys=True)
+        log_list = []
+        for filename, meta in resp.items():
+            size, ts_str = meta.decode('utf-8').split(':')
+            ts = datetime.datetime.fromtimestamp(int(ts_str) / 1e9)
+            log_list.append((filename, size, ts))
+        return log_list
+
+    def ulog_remove(self, max_dt=None):
+        max_dt = max_dt or datetime.datetime.now()
+        data = {'ts': str(int(max_dt.timestamp() * 1e9))}
+        resp, status = self._request('/ulog_remove', data, None)
+        return status == 200
+
+    def count(self, db=None):
+        """
+        Return the number of keys in the given database.
+
+        :param int db: database index.
+        :return: number of keys.
+        """
+        resp = self.status(db)
+        return int(resp.get('count') or 0)
+
+    def size(self, db=None):
+        """
+        Return the size of the given database in bytes.
+
+        :param int db: database index.
+        :return: size in bytes.
+        """
+        resp = self.status(db)
+        return int(resp.get('size') or 0)
+
+    def __getitem__(self, key):
+        return self.get(key)
+    def __setitem__(self, key, value):
+        self.set(key, value)
+    def __delitem__(self, key):
+        self.remove(key)
+
+    def update(self, __data=None, **kwargs):
+        if __data is None:
+            __data = kwargs
+        else:
+            __data.update(kwargs)
+        return self.set_bulk(__data)
+    pop = seize
+
+    def __contains__(self, key):
+        return self.check(key)
+
+    def __len__(self):
+        return self.count()
+
+    def keys(self, db=None):
+        cursor = self.cursor(db=db)
+        if not cursor.jump(): return
+        while True:
+            key = cursor.key()
+            if key is None: return
+            yield key
+            if not cursor.step(): return
+
+    def keys_nonlazy(self, db=None):
+        return self.match_prefix('', db=db)
+
+    def values(self, db=None):
+        cursor = self.cursor(db=db)
+        if not cursor.jump(): return
+        while True:
+            value = cursor.value()
+            if value is None: return
+            yield value
+            if not cursor.step(): return
+
+    def items(self, db=None):
+        cursor = self.cursor(db=db)
+        if not cursor.jump(): return
+        while True:
+            kv = cursor.get()
+            if kv is None: return
+            yield kv
+            if not cursor.step(): return
+
+    def __iter__(self):
+        return iter(self.keys())
+
+
+class Cursor(object):
+    def __init__(self, protocol, cursor_id, db=None):
+        self.protocol = protocol
+        self.cursor_id = cursor_id
+        self.db = db
+        self._valid = False
+
+    def __iter__(self):
+        if not self._valid:
+            self.jump()
+        return self
+
+    def is_valid(self):
+        return self._valid
+
+    def jump(self, key=None):
+        self._valid = self.protocol.cur_jump(self.cursor_id, key, self.db)
+        return self._valid
+
+    def jump_back(self, key=None):
+        self._valid = self.protocol.cur_jump_back(self.cursor_id, key, self.db)
+        return self._valid
+
+    def step(self):
+        self._valid = self.protocol.cur_step(self.cursor_id)
+        return self._valid
+
+    def step_back(self):
+        self._valid = self.protocol.cur_step_back(self.cursor_id)
+        return self._valid
+
+    def key(self):
+        if self._valid:
+            return self.protocol.cur_get_key(self.cursor_id)
+
+    def value(self):
+        if self._valid:
+            return self.protocol.cur_get_value(self.cursor_id)
+
+    def get(self):
+        if self._valid:
+            return self.protocol.cur_get(self.cursor_id)
+
+    def set_value(self, value):
+        if self._valid:
+            if not self.protocol.cur_set_value(self.cursor_id, value):
+                self._valid = False
+        return self._valid
+
+    def remove(self):
+        if self._valid:
+            if not self.protocol.cur_remove(self.cursor_id):
+                self._valid = False
+        return self._valid
+
+    def seize(self):
+        if self._valid:
+            kv = self.protocol.cur_seize(self.cursor_id)
+            if kv is None:
+                self._valid = False
+            return kv
+
+    def close(self):
+        if self._valid and self.protocol.cur_delete(self.cursor_id):
+            self._valid = False
+            return True
+        return False
+
+    def __next__(self):
+        if not self._valid:
+            raise StopIteration
+        kv = self.protocol.cur_get(self.cursor_id)
+        if kv is None:
+            self._valid = False
+            raise StopIteration
+        elif not self.step():
+            self._valid = False
+        return kv
+    next = __next__
