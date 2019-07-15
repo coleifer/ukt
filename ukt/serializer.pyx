@@ -85,7 +85,7 @@ def _serialize_dict(dict d):
 
 
 # Serialization method compatible with KyotoTycoon's lua "mapload" function.
-def _deserialize_dict(raw_data, deserialize=False):
+def _deserialize_dict(raw_data, deserialize=True):
     cdef:
         Py_ssize_t buflen
         bytes data = encode(raw_data)
@@ -185,7 +185,7 @@ def _serialize_list(l):
 
 
 # Serialization method compatible with KyotoTycoon's lua "arrayload" function.
-def _deserialize_list(raw_data, deserialize=False):
+def _deserialize_list(raw_data, deserialize=True):
     cdef:
         Py_ssize_t buflen
         bytes data = encode(raw_data)

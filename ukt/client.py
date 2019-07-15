@@ -319,12 +319,12 @@ class KyotoTycoon(object):
 
     def serialize_dict(self, d):
         return _serialize_dict(d)
-    def deserialize_dict(self, data, decode_values=False):
+    def deserialize_dict(self, data, decode_values=True):
         return _deserialize_dict(data, decode_values)
 
     def serialize_list(self, l):
         return _serialize_list(l)
-    def deserialize_list(self, data, decode_values=False):
+    def deserialize_list(self, data, decode_values=True):
         return _deserialize_list(data, decode_values)
 
     @contextmanager

@@ -247,9 +247,10 @@ class KyotoTycoonTests(object):
         report = self.db.report()
         accum = {}
         for part in report['db_0'].split():
-            key, value = part.split('=')
+            key, value = part.split(b'=')
             accum[key] = value
-        self.assertEqual(accum['path'], self.server_kwargs['database'])
+        self.assertEqual(accum[b'path'],
+                         self.server_kwargs['database'].encode('utf8'))
 
 
 class TestKyotoTycoonHash(KyotoTycoonTests, BaseTestCase):
