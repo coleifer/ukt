@@ -3,6 +3,7 @@
 import functools
 import os
 import sys
+import threading
 import unittest
 import warnings
 
@@ -1156,7 +1157,7 @@ class TestKyotoTycoonMultiDatabase(BaseTestCase):
         self.assertTrue('k3' not in k1)
 
 
-class TestMultipleThreads(object):#BaseTestCase):
+class TestMultipleThreads(BaseTestCase):
     server = EmbeddedServer
     server_kwargs = {'database': '*'}
 
@@ -1169,7 +1170,6 @@ class TestMultipleThreads(object):#BaseTestCase):
             result = self.db.get_bulk(keys)
             self.assertEqual(result, dict(('k%s' % i, 'v%s' % i)
                                           for i in range(s, n + s)))
-            self.db.close()
 
         threads = [threading.Thread(target=write_and_read,
                                     args=(100, 100 * i)) for i in range(10)]
