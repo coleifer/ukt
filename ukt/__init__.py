@@ -10,3 +10,4 @@ from ukt.client import ServerError
 
 from ukt.client import KyotoTycoon
 from ukt.embedded import EmbeddedServer
+from ukt.queue import Queue

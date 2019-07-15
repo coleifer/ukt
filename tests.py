@@ -798,7 +798,7 @@ class TestKyotoTycoonScripting(BaseTestCase):
             '0': 'i0', '1': 'i1', '2': 'i2', '3': 'i2', '4': 'i2'})
         self.assertEqual(L.queue_clear(queue='tq'), {'num': '5'})
 
-    def Xtest_queue_helper(self):
+    def test_queue_helper(self):
         qa = Queue(self.db, 'qa')
         qb = Queue(self.db, 'qb')
 
