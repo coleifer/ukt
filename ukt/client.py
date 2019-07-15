@@ -1158,12 +1158,16 @@ class KyotoTycoon(object):
         resp = self.status(db)
         return int(resp.get('size') or 0)
 
-    def __getitem__(self, key):
-        return self.get(key)
-    def __setitem__(self, key, value):
-        self.set(key, value)
-    def __delitem__(self, key):
-        self.remove(key)
+    def _key_db_from_item(self, item):
+        return item if isinstance(item, tuple) else (item, self.default_db)
+
+    def __getitem__(self, item):
+        return self.get(*self._key_db_from_item(item))
+    def __setitem__(self, item, value):
+        key, db = self._key_db_from_item(item)
+        self.set(key, value, db=db)
+    def __delitem__(self, item):
+        self.remove(*self._key_db_from_item(item))
 
     def update(self, __data=None, **kwargs):
         if __data is None:
@@ -1173,8 +1177,8 @@ class KyotoTycoon(object):
         return self.set_bulk(__data)
     pop = seize
 
-    def __contains__(self, key):
-        return self.check(key)
+    def __contains__(self, item):
+        return self.check(*self._key_db_from_item(item))
 
     def __len__(self):
         return self.count()

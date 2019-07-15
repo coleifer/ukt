@@ -912,7 +912,7 @@ class TestKyotoTycoonScripting(BaseTestCase):
         db2.close_all()
 
 
-class TestKyotoTycoonScriptingMultiDB(object):#BaseTestCase):
+class TestKyotoTycoonScriptingMultiDB(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server = EmbeddedServer
     server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '%']}
@@ -979,7 +979,7 @@ class TestKyotoTycoonScriptingMultiDB(object):#BaseTestCase):
         self.assertEqual(L.lrpop(key='l1', db=1)['value'], 'i1')
 
 
-class TestKyotoTycoonMultiDatabase(object):#BaseTestCase):
+class TestKyotoTycoonMultiDatabase(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server = EmbeddedServer
     server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '*']}
@@ -1094,11 +1094,11 @@ class TestKyotoTycoonMultiDatabase(object):#BaseTestCase):
 
         for k in (k0, k1):
             k.remove_bulk(['i', 'j'])
-            self.assertEqual(k.incr('i'), 1)
-            self.assertEqual(k.incr('i'), 2)
+            self.assertEqual(k.increment('i'), 1)
+            self.assertEqual(k.increment('i'), 2)
 
-            self.assertEqual(k.incr_double('j'), 1.)
-            self.assertEqual(k.incr_double('j'), 2.)
+            self.assertEqual(k.increment_double('j'), 1.)
+            self.assertEqual(k.increment_double('j'), 2.)
 
         self.assertEqual(k0['k1'], 'v1-0x')
         self.assertEqual(k0['k1', 1], 'v1-1x')
