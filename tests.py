@@ -4,6 +4,7 @@ import functools
 import os
 import sys
 import threading
+import time
 import unittest
 import warnings
 
@@ -1212,6 +1213,39 @@ class TestConnectionPool(BaseTestCase):
 
         self.db.close_all()
         self.assertEqual(p.stats, (0, 0, 0, 0))
+
+    def test_many_threads(self):
+        self.db.close_all()  # Ensure no open connections.
+        p = self.db.pool
+        def t_ops():
+            for _ in range(10):
+                self.db.get('kx')
+        threads = [threading.Thread(target=t_ops) for _ in range(16)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        stats = p.stats
+        self.assertTrue(stats[0] == stats[2] == stats[3] == 0)
+        self.assertTrue(stats[1] > 0)
+        self.assertEqual(self.db.close_all(), stats[1])
+
+    def test_max_age(self):
+        self.db.close_all()
+
+        p = self.db.pool
+        s1 = p.create_socket()
+        s2 = p.create_socket()
+
+        now = time.time()
+        p.free = [(now - 3601, s1), (now, s2)]
+        s = p.checkout()
+        self.assertTrue(s is s2)
+        self.assertEqual(p.stats, (1, 0, 0, 0))
+        self.assertTrue(s1.is_closed)
+        p.checkin(s)
+        self.assertEqual(p.stats, (0, 1, 0, 0))
 
 
 class TestArrayMapSerialization(unittest.TestCase):
