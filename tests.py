@@ -69,7 +69,7 @@ class KyotoTycoonTests(object):
         self.assertEqual(len(self.db), 0)
 
         # Test basic set and get.
-        self.db.set('k1', 'v1')
+        self.assertEqual(self.db.set('k1', 'v1'), 1)
         self.assertEqual(self.db.get('k1'), 'v1')
         self.assertTrue(self.db.get('kx') is None)
 
@@ -1190,8 +1190,24 @@ class TestConnectionPool(BaseTestCase):
         self.assertEqual(p.stats, (0, 0, 0, 0))
 
         # Performing a DB operation will open a connection.
-        self.assertTrue(self.db.get('k1') is None)
+        self.assertEqual(self.db.set('k1', 'v1'), 1)
+        self.assertEqual(self.db.get('k1'), 'v1')
         self.assertEqual(p.stats, (0, 1, 0, 0))
+
+        # Performing an operation that uses the HTTP API opens an HTTP conn.
+        self.assertTrue(self.db.exists('k1'))
+        self.assertEqual(p.stats, (0, 1, 0, 1))
+
+        # Using a separate thread is fine.
+        def t_ops():
+            self.assertEqual(self.db.set('k1', 'v1-x'), 1)
+            self.assertEqual(self.db.get('k1'), 'v1-x')
+            self.assertTrue('k1' in self.db)
+        t = threading.Thread(target=t_ops)
+        t.start()
+        t.join()
+
+        self.assertEqual(p.stats, (0, 1, 0, 1))
 
         self.db.close_all()
         self.assertEqual(p.stats, (0, 0, 0, 0))
