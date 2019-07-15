@@ -1240,18 +1240,17 @@ class TestConnectionPool(object):#BaseTestCase):
         self.assertEqual(stats(), (0, 0))
 
 
-class TestArrayMapSerialization(object):#unittest.TestCase):
+class TestArrayMapSerialization(unittest.TestCase):
     def setUp(self):
-        db = KyotoTycoon()
-        self.p = db._protocol
+        self.db = KyotoTycoon()
 
     def assertSerializeDict(self, dictobj):
-        dictstr = self.p.serialize_dict(dictobj)
-        self.assertEqual(self.p.deserialize_dict(dictstr), dictobj)
+        dictstr = self.db.serialize_dict(dictobj)
+        self.assertEqual(self.db.deserialize_dict(dictstr), dictobj)
 
     def assertSerializeList(self, listobj):
-        liststr = self.p.serialize_list(listobj)
-        self.assertEqual(self.p.deserialize_list(liststr), listobj)
+        liststr = self.db.serialize_list(listobj)
+        self.assertEqual(self.db.deserialize_list(liststr), listobj)
 
     def test_dict_serialize_deserialize(self):
         self.assertSerializeDict({'k1': 'v1', 'k2': 'v2'})
@@ -1264,7 +1263,8 @@ class TestArrayMapSerialization(object):#unittest.TestCase):
         self.assertSerializeDict({})
 
     def test_dict_serialization(self):
-        serialize, deserialize = self.p.serialize_dict, self.p.deserialize_dict
+        serialize, deserialize = (self.db.serialize_dict,
+                                  self.db.deserialize_dict)
 
         data = {'foo': 'baze'}
         dictstr = serialize(data)
@@ -1290,7 +1290,8 @@ class TestArrayMapSerialization(object):#unittest.TestCase):
         self.assertSerializeList([])
 
     def test_list_serialization(self):
-        serialize, deserialize = self.p.serialize_list, self.p.deserialize_list
+        serialize, deserialize = (self.db.serialize_list,
+                                  self.db.deserialize_list)
         # Simple tests.
         data = ['foo', 'baze', 'nugget', 'bar']
         liststr = serialize(data)
