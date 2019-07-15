@@ -12,19 +12,14 @@ except ImportError:
     from urllib import quote as quote_from_bytes
     from urllib import unquote as unquote_to_bytes
     from urllib import urlencode
-import atexit
 import datetime
 import heapq
 import io
 import itertools
 import json
-import logging
-import random
 import socket
-import subprocess
 import struct
 import sys
-import threading
 import time
 
 try:
@@ -38,7 +33,8 @@ except ImportError:
     msgpack = None
 
 
-logger = logging.getLogger(__name__)
+if sys.version_info[0] > 2:
+    unicode = str
 
 
 class KTError(Exception): pass
@@ -56,21 +52,12 @@ NO_REPLY = 0x01
 EXPIRE = 0x7fffffffffffffff
 
 
-def encode(s):
-    if isinstance(s, str):
-        return s.encode('utf8')
-    elif isinstance(s, bytes):
-        return s
-    elif s is not None:
-        return str(s).encode('utf8')
-
-def decode(s):
-    if isinstance(s, bytes):
-        return s.decode('utf8')
-    elif isinstance(s, str):
-        return s
-    elif s is not None:
-        return str(s)
+from ukt.serializer import decode
+from ukt.serializer import encode
+from ukt.serializer import _deserialize_dict
+from ukt.serializer import _deserialize_list
+from ukt.serializer import _serialize_dict
+from ukt.serializer import _serialize_list
 
 
 quote_b = partial(quote_from_bytes, safe='')
@@ -243,6 +230,25 @@ class Pool(object):
         return n
 
 
+class ScriptRunner(object):
+    __slots__ = ('client',)
+
+    def __init__(self, client):
+        self.client = client
+
+    def __getattr__(self, attr_name):
+        def run_script(__data=None, no_reply=False, encode_values=True,
+                       decode_values=True, **kwargs):
+            if __data is None:
+                __data = kwargs
+            elif kwargs:
+                __data.update(kwargs)
+            return self.client.script(attr_name, __data, no_reply,
+                                      encode_values, decode_values)
+        return run_script
+
+
+
 struct_hi = struct.Struct('>HI')
 struct_i = struct.Struct('>I')
 struct_ii = struct.Struct('>II')
@@ -263,6 +269,8 @@ class KyotoTycoon(object):
     def __init__(self, host='127.0.0.1', port=1978, timeout=None, default_db=0,
                  decode_keys=True, serializer=None, encode_value=None,
                  decode_value=None, max_age=3600):
+        self.host = host
+        self.port = port
         self.pool = Pool(host, port, timeout, max_age)
         self.default_db = default_db
         self.decode_keys = decode_keys
@@ -297,6 +305,22 @@ class KyotoTycoon(object):
 
     def close_all(self):
         return self.pool.disconnect()
+
+    @property
+    def lua(self):
+        if not hasattr(self, '_script_runner'):
+            self._script_runner = ScriptRunner(self)
+        return self._script_runner
+
+    def serialize_dict(self, d):
+        return _serialize_dict(d)
+    def deserialize_dict(self, data, decode=False):
+        return _deserialize_dict(data, decode)
+
+    def serialize_list(self, l):
+        return _serialize_list(l)
+    def deserialize_list(self, data, decode=False):
+        return _deserialize_list(data, decode)
 
     @contextmanager
     def ctx(self, http=False):
@@ -412,6 +436,16 @@ class KyotoTycoon(object):
         result = self.get_bulk_details(db_key_list, decode_value)
         if result:
             return result[0][2]
+
+    def get_bytes(self, key, db=None):
+        """
+        Get the bytes at a given key. Short-hand for get(..decode_value=False).
+
+        :param key: key to fetch.
+        :param int db: database index.
+        :return: value or None.
+        """
+        return self.get(key, db, False)
 
     def set_bulk(self, data, db=None, expire_time=None, no_reply=False,
                  encode_values=True):
@@ -1258,142 +1292,3 @@ class Cursor(object):
             self._valid = False
         return kv
     next = __next__
-
-
-class EmbeddedServer(object):
-    def __init__(self, server='ktserver', host='127.0.0.1', port=None,
-                 database='*', serializer=None, server_args=None, quiet=False):
-        self._server = server
-        self._host = host
-        self._port = port
-        self._serializer = serializer or KT_BINARY
-        self._database = database
-        self._server_args = server_args or []
-        self._quiet = quiet
-
-        # Signals for server startup and shutdown.
-        self._server_started = threading.Event()
-        self._server_terminated = threading.Event()
-        self._server_terminated.set()  # Start off in terminated state.
-
-        # Placeholders for server process and client.
-        self._server_p = None
-        self._client = None
-
-    def _create_client(self):
-        return KyotoTycoon(self._host, self._port, serializer=self._serializer)
-
-    @property
-    def client(self):
-        if self._server_terminated.is_set():
-            raise KTError('server not running')
-        elif self._client is None:
-            self._client = self._create_client()
-        return self._client
-
-    @property
-    def pid(self):
-        if not self._server_terminated.is_set():
-            return self._server_p.pid
-
-    def _run_server(self, port):
-        command = [
-            self._server,
-            '-le',  # Log errors.
-            '-host',
-            self._host,
-            '-port',
-            str(port)] + self._server_args + [self._database]
-
-        while not self._server_terminated.is_set():
-            if self._quiet:
-                out, err = subprocess.PIPE, subprocess.PIPE
-            else:
-                out, err = sys.__stdout__.fileno(), sys.__stderr__.fileno()
-            self._server_p = subprocess.Popen(command, stderr=err, stdout=out)
-
-            self._server_started.set()
-            self._server_p.wait()
-            self._client = None
-
-            time.sleep(0.1)
-            if not self._server_terminated.is_set():
-                logger.error('server process died, restarting...')
-
-        logger.info('server shutdown')
-
-    def _stop_server(self):
-        self._server_terminated.set()
-        self._server_p.terminate()
-        self._server_p.wait()
-        self._server_p = self._client = None
-
-    def run(self):
-        """
-        Run ktserver on a random high port and return a client connected to it.
-        """
-        if not self._server_terminated.is_set():
-            logger.warning('server already running')
-            return False
-
-        if self._port is None:
-            self._port = self._find_open_port()
-
-        self._server_started.clear()
-        self._server_terminated.clear()
-
-        t = threading.Thread(target=self._run_server, args=(self._port,))
-        t.daemon = True
-        t.start()
-
-        self._server_started.wait()  # Wait for server to start up.
-        atexit.register(self._stop_server)
-
-        attempts = 0
-        while attempts < 20:
-            attempts += 1
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.connect((self._host, self._port))
-                s.close()
-                return True
-            except socket.error:
-                time.sleep(0.1)
-            except OSError:
-                time.sleep(0.1)
-
-        self._stop_server()
-        raise KTError('Unable to connect to server on %s:%s' %
-                               (self._host, self._port))
-
-    def stop(self):
-        if self._server_terminated.is_set():
-            logger.warning('server already stopped')
-            return False
-
-        if hasattr(atexit, 'unregister'):
-            atexit.unregister(self._stop_server)
-        else:
-            funcs = []
-            for fn, arg, kw in atexit._exithandlers:
-                if fn != self._stop_server:
-                    funcs.append((fn, arg, kw))
-            atexit._exithandlers = funcs
-        self._stop_server()
-
-    def _find_open_port(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        attempts = 0
-        while attempts < 32:
-            attempts += 1
-            port = random.randint(16000, 32000)
-            try:
-                sock.bind(('127.0.0.1', port))
-                sock.listen(1)
-                sock.close()
-                time.sleep(0.1)
-                return port
-            except OSError:
-                pass
-
-        raise KTError('Could not find open port')

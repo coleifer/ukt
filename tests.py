@@ -1,9 +1,15 @@
 #!/usr/bin/env python
 
+import functools
 import os
 import sys
 import unittest
 import warnings
+
+try:
+    import msgpack
+except ImportError:
+    msgpack = None
 
 from ukt import *
 
@@ -134,7 +140,7 @@ class KyotoTycoonTests(object):
         self.assertEqual(self.db.increment_double('nd'), 1.)
         self.assertEqual(self.db.increment_double('nd', 2.5), 3.5)
 
-    def Xtest_noreply(self):
+    def test_noreply(self):
         self.assertTrue(self.db.set('k1', 'v1', no_reply=True) is None)
         self.assertEqual(self.db.get('k1'), 'v1')
         self.assertTrue(self.db.remove('k1', no_reply=True) is None)
@@ -145,82 +151,84 @@ class KyotoTycoonTests(object):
         self.assertTrue(self.db.remove_bulk(['k1'], no_reply=True) is None)
         self.assertTrue(self.db.get('k1') is None)
 
-    def Xtest_get_bytes(self):
-        self.db['k1'] = b'v1'
-        self.db['k2'] = b'\xff\x00\xff'
-        self.assertEqual(self.db.get_bytes('k1'), b'v1')
-        self.assertEqual(self.db.get_bytes('k2'), b'\xff\x00\xff')
+    def test_get_bytes(self):
+        self.db.set('k1', b'v1')
+        self.db.set('k2', b'\xff\x00\xff')
+        self.assertEqual(self.db.get('k1', decode_value=False), b'v1')
+        self.assertEqual(self.db.get('k2', decode_value=False),
+                         b'\xff\x00\xff')
         self.assertEqual(self.db.get_bulk(['k1', 'k2'], decode_values=False), {
             'k1': b'v1', 'k2': b'\xff\x00\xff'})
 
-    def Xtest_large_read_write(self):
+    def test_large_read_write(self):
         long_str = 'a' * (1024 * 1024 * 32)  # 32MB string.
         self.db['key'] = long_str
         self.assertEqual(self.db['key'], long_str)
         del self.db['key']
         self.assertEqual(len(self.db), 0)
 
-    def Xtest_protocol(self):
+    def test_protocol(self):
         # Both protocols support some basic methods, which we will test (namely
         # get/set/remove and their bulk equivalents).
         self.assertEqual(self.db.count(), 0)
 
         # Test basic set and get.
-        self.db.set('k1', 'v1', 0, None)
-        self.assertEqual(self.db.get('k1', 0), 'v1')
-        self.assertTrue(self.db.get('kx', 0) is None)
+        self.db.set('k1', 'v1')
+        self.assertEqual(self.db.get('k1'), 'v1')
+        self.assertTrue(self.db.get('kx') is None)
 
         # Test setting bulk data returns records set.
-        nkeys = self.db.set_bulk({'k1': 'v1-x', 'k2': 'v2', 'k3': 'v3'}, 0, None)
+        nkeys = self.db.set_bulk({'k1': 'v1-x', 'k2': 'v2', 'k3': 'v3'})
         self.assertEqual(nkeys, 3)
 
         # Test getting bulk data returns dict of just existing keys.
-        self.assertEqual(self.db.get_bulk(['k1', 'k2', 'k3', 'kx'], 0),
+        self.assertEqual(self.db.get_bulk(['k1', 'k2', 'k3', 'kx']),
                          {'k1': 'v1-x', 'k2': 'v2', 'k3': 'v3'})
 
         # Test removing a record returns number of rows removed.
-        self.assertEqual(self.db.remove('k1', 0), 1)
-        self.assertEqual(self.db.remove('k1', 0), 0)
+        self.assertEqual(self.db.remove('k1'), 1)
+        self.assertEqual(self.db.remove('k1'), 0)
 
-        self.db.set('k1', 'v1', 0, None)
-        self.assertEqual(self.db.remove_bulk(['k1', 'k3', 'kx'], 0), 2)
-        self.assertEqual(self.db.remove_bulk([], 0), 0)
-        self.assertEqual(self.db.remove_bulk(['k2'], 0), 1)
+        self.db.set('k1', 'v1')
+        self.assertEqual(self.db.remove_bulk(['k1', 'k3', 'kx']), 2)
+        self.assertEqual(self.db.remove_bulk([]), 0)
+        self.assertEqual(self.db.remove_bulk(['k2']), 1)
 
-    def Xtest_http_protocol_special(self):
-        self.db.append('key', 'abc', 0, None)
-        self.db.append('key', 'def', 0, None)
-        self.assertEqual(self.db.get('key', 0), 'abcdef')
+    def test_http_protocol_special(self):
+        self.db.append('key', 'abc')
+        self.db.append('key', 'def')
+        self.assertEqual(self.db.get('key'), 'abcdef')
 
         # Test atomic replace and pop.
-        self.assertTrue(self.db.replace('key', 'xyz', 0, None))
-        self.assertEqual(self.db.seize('key', 0), 'xyz')
-        self.assertFalse(self.db.seize('key', 0))
-        self.assertFalse(self.db.replace('key', 'abc', 0, None))
-        self.assertTrue(self.db.add('key', 'foo', 0, None))
-        self.assertFalse(self.db.add('key', 'bar', 0, None))
-        self.assertEqual(self.db.get('key', 0), 'foo')
+        self.assertTrue(self.db.replace('key', 'xyz'))
+        self.assertEqual(self.db.seize('key'), 'xyz')
+        self.assertFalse(self.db.seize('key'))
+        self.assertFalse(self.db.replace('key', 'abc'))
+        self.assertTrue(self.db.add('key', 'foo'))
+        self.assertFalse(self.db.add('key', 'bar'))
+        self.assertEqual(self.db.get('key'), 'foo')
 
         # Test compare-and-swap.
-        self.assertTrue(self.db.cas('key', 'foo', 'baz', 0, None))
-        self.assertFalse(self.db.cas('key', 'foo', 'bar', 0, None))
-        self.assertEqual(self.db.get('key', 0), 'baz')
+        self.assertTrue(self.db.cas('key', 'foo', 'baz'))
+        self.assertFalse(self.db.cas('key', 'foo', 'bar'))
+        self.assertEqual(self.db.get('key'), 'baz')
 
-        self.assertTrue(self.db.check('key', 0))
-        self.assertFalse(self.db.check('other', 0))
+        self.assertTrue(self.db.check('key'))
+        self.assertFalse(self.db.check('other'))
         self.assertEqual(self.db.count(), 1)
 
         # Test numeric operations.
         self.assertEqual(self.db.increment('n'), 1)
-        self.assertEqual(self.db.increment('n', 3, 0, None), 4)
+        self.assertEqual(self.db.increment('n', 3), 4)
         self.assertEqual(self.db.increment_double('nd'), 1.)
-        self.assertEqual(self.db.increment_double('nd', 2.5, 0, None), 3.5)
+        self.assertEqual(self.db.increment_double('nd', 2.5), 3.5)
 
         # Flush db.
         self.db.clear()
 
         # Set some data for matching tests.
-        self.db.set_bulk(dict(('k%04d' % i, 'v%01024d' % i) for i in range(100)), 0)
+        self.db.set_bulk(dict(('k%04d' % i, 'v%01024d' % i)
+                              for i in range(100)), 0)
         keys = ['k%04d' % i for i in range(100)]
 
         # Test matching.
@@ -234,10 +242,19 @@ class KyotoTycoonTests(object):
             'k0028', 'k0029', 'k0032', 'k0042', 'k0052', 'k0062', 'k0072',
             'k0082', 'k0092'])
 
+    def test_report(self):
+        report = self.db.report()
+        accum = {}
+        for part in report['db_0'].split():
+            key, value = part.split('=')
+            accum[key] = value
+        self.assertEqual(accum['path'], self.server_kwargs['database'])
+
 
 class TestKyotoTycoonHash(KyotoTycoonTests, BaseTestCase):
     server = EmbeddedServer
     server_kwargs = {'database': '*'}
+
 
 
 class TestKyotoTycoonBTree(KyotoTycoonTests, BaseTestCase):
@@ -245,7 +262,7 @@ class TestKyotoTycoonBTree(KyotoTycoonTests, BaseTestCase):
     server_kwargs = {'database': '%'}
 
 
-class TestKyotoTycoonCursor(object):#BaseTestCase):
+class TestKyotoTycoonCursor(BaseTestCase):
     server = EmbeddedServer
     server_kwargs = {'database': '%'}
 
@@ -350,12 +367,13 @@ class TestKyotoTycoonCursor(object):#BaseTestCase):
         self.assertEqual(self.db.keys_nonlazy(), ['k1', 'k2', 'k3', 'k4'])
 
 
-class TestKyotoTycoonSerializers(object):#BaseTestCase):
+class TestKyotoTycoonSerializers(BaseTestCase):
     server = EmbeddedServer
     server_kwargs = {'database': '*'}
 
     def get_client(self, serializer):
-        return KyotoTycoon(self._server._host, self._server._port, serializer)
+        return KyotoTycoon(self._server.host, self._server.port,
+                           serializer=serializer)
 
     def test_serializer_binary(self):
         db = self.get_client(KT_BINARY)
@@ -409,7 +427,7 @@ class TestKyotoTycoonSerializers(object):#BaseTestCase):
         self.assertEqual(db.get('k3'), [u'foo', b'bar'])
 
 
-class TestKyotoTycoonScripting(object):#BaseTestCase):
+class TestKyotoTycoonScripting(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server = EmbeddedServer
     server_kwargs = {
@@ -778,7 +796,7 @@ class TestKyotoTycoonScripting(object):#BaseTestCase):
             '0': 'i0', '1': 'i1', '2': 'i2', '3': 'i2', '4': 'i2'})
         self.assertEqual(L.queue_clear(queue='tq'), {'num': '5'})
 
-    def test_queue_helper(self):
+    def Xtest_queue_helper(self):
         qa = Queue(self.db, 'qa')
         qb = Queue(self.db, 'qb')
 
@@ -840,10 +858,9 @@ class TestKyotoTycoonScripting(object):#BaseTestCase):
 
     def test_python_list_integration(self):
         L = self.db.lua
-        P = self.db._protocol
         data = ['foo', 'a' * 1024, '', 'b' * 1024 * 32, 'c']
 
-        self.db['l1'] = P.serialize_list(data)
+        self.db['l1'] = self.db.serialize_list(data)
         self.assertEqual(L.llen(key='l1'), {'num': '5'})
         self.assertEqual(L.lrpop(key='l1'), {'value': 'c'})
         self.assertEqual(L.lrpop(key='l1'), {'value': 'b' * 1024 * 32})
@@ -855,24 +872,24 @@ class TestKyotoTycoonScripting(object):#BaseTestCase):
             L.lrpush(key='l1', value=item)
 
         raw_data = self.db.get_bytes('l1')
-        self.assertEqual(P.deserialize_list(raw_data), data)
+        self.assertEqual(self.db.deserialize_list(raw_data), data)
         self.assertEqual(L.lrange(key='l1'), dict((str(i), data[i])
                                                   for i in range(len(data))))
 
-        db2 = KyotoTycoon(port=self.db._port, serializer=KT_NONE)
-        db2.set('l2', P.serialize_list(['i0', 'i1', 'i2', 'i3']))
+        db2 = KyotoTycoon(port=self.db.port, serializer=KT_NONE)
+        db2.set('l2', self.db.serialize_list(['i0', 'i1', 'i2', 'i3']))
         self.assertEqual(L.llen(key='l2'), {'num': '4'})
         self.assertEqual(L.lrpop(key='l2'), {'value': 'i3'})
-        self.assertEqual(P.deserialize_list(db2.get('l2')), ['i0', 'i1', 'i2'])
-        db2.close()
+        self.assertEqual(self.db.deserialize_list(db2.get('l2')),
+                         ['i0', 'i1', 'i2'])
+        db2.close_all()
 
     def test_python_dict_integration(self):
         L = self.db.lua
-        P = self.db._protocol
         data = {'a' * 64: 'b' * 128, 'c' * 1024: 'd' * 1024 * 32,
                 'e' * 256: 'f' * 1024 * 1024, 'g': ''}
 
-        self.db['h1'] = self.db._protocol.serialize_dict(data)
+        self.db['h1'] = self.db.serialize_dict(data)
         self.assertEqual(L.hgetall(table_key='h1'), data)
         self.assertEqual(L.hget(table_key='h1', key='e' * 256),
                          {'value': 'f' * 1024 * 1024})
@@ -881,16 +898,18 @@ class TestKyotoTycoonScripting(object):#BaseTestCase):
 
         L.hmset(table_key='h1', **data)
         raw_data = self.db.get_bytes('h1')
-        self.assertEqual(self.db._protocol.deserialize_dict(raw_data), data)
+        self.assertEqual(self.db.deserialize_dict(raw_data), data)
         self.assertEqual(L.hgetall(table_key='h1'), data)
 
-        db2 = KyotoTycoon(port=self.db._port, serializer=KT_NONE)
-        db2.set('h2', P.serialize_dict({'k1': 'v1', 'k2': 'v2', 'k3': 'v3'}))
+        db2 = KyotoTycoon(port=self.db.port, serializer=KT_NONE)
+
+        data = self.db.serialize_dict({'k1': 'v1', 'k2': 'v2', 'k3': 'v3'})
+        db2.set('h2', data)
         self.assertEqual(L.hdel(table_key='h2', key='k2'), {'num': '1'})
         self.assertEqual(L.hgetall(table_key='h2'), {'k1': 'v1', 'k3': 'v3'})
-        self.assertEqual(P.deserialize_dict(db2.get('h2')),
+        self.assertEqual(self.db.deserialize_dict(db2.get('h2')),
                          {'k1': 'v1', 'k3': 'v3'})
-        db2.close()
+        db2.close_all()
 
 
 class TestKyotoTycoonScriptingMultiDB(object):#BaseTestCase):
@@ -978,7 +997,7 @@ class TestKyotoTycoonMultiDatabase(object):#BaseTestCase):
         self.assertTrue(report['db_1'].endswith(b'path=%'))
 
     def test_multiple_databases_lua(self):
-        db = KyotoTycoon(self._server._host, self._server._port,
+        db = KyotoTycoon(self._server.host, self._server.port,
                          serializer=KT_NONE)
 
         db.set_bulk({'k1': 'v1-0', 'k2': 'v2-0', 'k3': 'v3-0'}, db=0)
@@ -996,8 +1015,8 @@ class TestKyotoTycoonMultiDatabase(object):#BaseTestCase):
             'k3': b'v3-1'})
 
     def test_multiple_databases(self):
-        k0 = KyotoTycoon(self._server._host, self._server._port, default_db=0)
-        k1 = KyotoTycoon(self._server._host, self._server._port, default_db=1)
+        k0 = KyotoTycoon(self._server.host, self._server.port, default_db=0)
+        k1 = KyotoTycoon(self._server.host, self._server.port, default_db=1)
 
         k0.set('k1', 'v1-0')
         k0.set('k2', 'v2-0')
