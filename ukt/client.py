@@ -164,6 +164,11 @@ class Pool(object):
         self.in_use_http = set()
         self.free_http = []
 
+    @property
+    def stats(self):
+        return (len(self.in_use), len(self.free),
+                len(self.in_use_http), len(self.free_http))
+
     def create_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
