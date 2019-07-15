@@ -223,11 +223,15 @@ class Pool(object):
             if not sock.is_closed:
                 heapq.heappush(self.free, (time.time(), sock))
 
-    def close(self):
+    def disconnect(self):
         n = 0
-        all_sockets = itertools.chain(self.free, self.free_http,
-                                      self.in_use, self.in_use_http)
-        for sock in all_sockets:
+        free_sockets = itertools.chain(self.free, self.free_http)
+        for _, sock in free_sockets:
+            sock.close()
+            n += 1
+
+        in_use_sockets = itertools.chain(self.in_use, self.in_use_http)
+        for sock in in_use_sockets:
             sock.close()
             n += 1
 
@@ -290,6 +294,9 @@ class KyotoTycoon(object):
 
     def set_database(self, db=0):
         self.default_db = db
+
+    def close_all(self):
+        return self.pool.disconnect()
 
     @contextmanager
     def ctx(self, http=False):
@@ -379,7 +386,7 @@ class KyotoTycoon(object):
             accum = []
             n_items, = struct_i.unpack(sock.recv(4))
             for i in range(n_items):
-                db, klen, vlen, xt = struct.dbkvxt.unpack(sock.recv(18))
+                db, klen, vlen, xt = struct_dbkvxt.unpack(sock.recv(18))
                 key = sock.recv(klen)
                 value = sock.recv(vlen)
                 if self.decode_keys:
@@ -399,6 +406,8 @@ class KyotoTycoon(object):
         :param bool decode_value: deserialize value after reading.
         :return: value or None.
         """
+        if db is None:
+            db = self.default_db
         db_key_list = ((db, key),)
         result = self.get_bulk_details(db_key_list, decode_value)
         if result:
@@ -865,6 +874,8 @@ class KyotoTycoon(object):
         """
         resp, status = self._request('/check', {'key': key}, db, (450,))
         return status != 450
+
+    exists = check
 
     def length(self, key, db=None):
         """
