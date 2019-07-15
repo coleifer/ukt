@@ -913,7 +913,7 @@ class KyotoTycoon(object):
     def _do_bulk_command(self, cmd, params, db=None, decode_values=True, **kw):
         resp, status = self._request(cmd, params, db, **kw)
 
-        n = resp.pop('num' if self._decode_keys else b'num')
+        n = resp.pop('num' if self.decode_keys else b'num')
         if n == b'0':
             return {}
 
@@ -1022,7 +1022,7 @@ class KyotoTycoon(object):
         if status == 450:
             return
         key = resp[b'key']
-        if self._decode_keys:
+        if self.decode_keys:
             key = decode(key)
         return key
 
@@ -1042,7 +1042,7 @@ class KyotoTycoon(object):
         if status == 450:
             return
         key = resp[b'key']
-        if self._decode_keys:
+        if self.decode_keys:
             key = decode(key)
         value = resp[b'value']
         if decode_value:
@@ -1054,7 +1054,7 @@ class KyotoTycoon(object):
         if status == 450:
             return
         key = resp[b'key']
-        if self._decode_keys:
+        if self.decode_keys:
             key = decode(key)
         value = resp[b'value']
         if decode_value:
