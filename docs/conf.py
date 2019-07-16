@@ -34,7 +34,7 @@ try:
 except ImportError:
     import warnings
     warnings.warn('Unable to determine project version!')
-    __version__ = '0.7.0'
+    __version__ = '0.1.1'
 
 # The short X.Y version
 version = __version__
