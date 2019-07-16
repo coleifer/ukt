@@ -606,6 +606,67 @@ Kyoto Tycoon client
         Close the cursor.
 
 
+.. py:class:: Queue(client, key, db=None)
+
+    :param KyotoTycoon client: client instance.
+    :param str key: key to store queue data.
+    :param int db: database index.
+
+    Queue implementation using lua functions (provided in ``scripts/kt.lua``).
+
+    .. py:method:: add(item)
+
+        :param item: item to add to queue.
+        :return: id of newly-added item.
+
+    .. py:method:: extend(items)
+
+        :param list items: list of items to add to queue.
+        :return: number of items added to queue.
+
+    .. py:method:: pop(n=1)
+
+        :param int n: number of items to remove from queue.
+        :return: either a single item or a list of items (depending on ``n``).
+
+    .. py:method:: rpop(n=1)
+
+        :param int n: number of items to remove from end of queue.
+        :return: either a single item or a list of items (depending on ``n``).
+
+    .. py:method:: peek(n=1)
+
+        :param int n: number of items to read from queue.
+        :return: either a single item or a list of items (depending on ``n``).
+
+    .. py:method:: rpeek(n=1)
+
+        :param int n: number of items to read from end of queue.
+        :return: either a single item or a list of items (depending on ``n``).
+
+    .. py:method:: count()
+
+        :return: number of items in the queue.
+
+    .. py:method:: remove(data, n=None)
+
+        :param data: value to remove from queue.
+        :param int n: max occurrences to remove.
+        :return: number of items removed.
+
+    .. py:method:: rremove(data, n=None)
+
+        :param data: value to remove from end of queue.
+        :param int n: max occurrences to remove.
+        :return: number of items removed.
+
+    .. py:method:: clear()
+
+        :return: number of items in queue when cleared.
+
+        Remove all items from queue.
+
+
 Embedded Servers
 ----------------
 
