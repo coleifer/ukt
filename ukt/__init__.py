@@ -1,3 +1,5 @@
+__version__ = '0.1.0'
+
 from ukt.client import KT_BINARY
 from ukt.client import KT_JSON
 from ukt.client import KT_MSGPACK
