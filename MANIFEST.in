@@ -1,4 +1,5 @@
 include LICENSE
 include README.md
 include tests.py
+include scripts/kt.lua
 recursive-include docs *
