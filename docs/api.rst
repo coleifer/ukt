@@ -31,36 +31,75 @@ Serializers
 Kyoto Tycoon client
 -------------------
 
-.. py:class:: KyotoTycoon(host='127.0.0.1', port=1978, serializer=KT_BINARY, decode_keys=True, timeout=None, connection_pool=False, default_db=0)
+.. py:class:: KyotoTycoon(host='127.0.0.1', port=1978, timeout=None, default_db=0, decode_keys=True, serializer=None, encode_value=None, decode_value=None, max_age=3600)
 
     :param str host: server host.
     :param int port: server port.
-    :param serializer: serialization method to use for storing/retrieving values.
-        Accepts ``KT_BINARY``, ``KT_JSON``, ``KT_MSGPACK``, ``KT_NONE`` or ``KT_PICKLE``.
-    :param bool decode_keys: allow unicode keys, encoded as UTF-8.
-    :param int timeout: socket timeout (optional).
-    :param bool connection_pool: use a connection pool to manage sockets.
-    :param int default_db: default database to operate on.
+    :param int timeout: socket timeout for database connection.
+    :param int default_db: default database index.
+    :param bool decode_keys: decode keys as utf8-encoded unicode.
+    :param serializer: serialization method to use for storing/retrieving
+        values. Default is ``KT_BINARY``, which treats values as utf8-encoded
+        unicode. ``KT_NONE`` disables all serialization, or use one of
+        ``KT_JSON``, ``KT_MSGPACK`` or ``KT_PICKLE``.
+    :param encode_value: custom serializer for encoding values as bytestrings.
+    :param decode_value: custom deserializer for decoding bytestrings.
+    :param int max_age: max idle time for socket in connection pool.
 
     Client for interacting with Kyoto Tycoon database.
 
-    .. py:method:: close(allow_reuse=True)
+    .. py:method:: set_database(db)
 
-        :param bool allow_reuse: when the connection pool is enabled, this flag
-            indicates whether the connection can be reused. For unpooled
-            clients this flag has no effect.
+        :param int db: database index.
 
-        Close the connection to the server.
+        Set the default database for the client.
 
     .. py:method:: close_all()
 
-        When using the connection pool, this method can close *all* client
-        connections.
+        :return: number of connections that were closed.
+
+        Close all connections in the connection pool.
+
+    .. py:method:: serialize_dict(d)
+
+        :param dict d: arbitrary data.
+        :return: serialized data.
+
+        Serialize a ``dict`` as a sequence of bytes compatible with KT's
+        built-in lua ``mapdump`` function.
+
+    .. py:method:: deserialize_dict(data, decode_values=True)
+
+        :param bytes data: serialized data.
+        :param bool decode_values: decode values to unicode strings.
+        :return: data ``dict``.
+
+        Deserialize a a sequence of bytes into a dictionary, optionally
+        decoding the values as unicode strings. Compatible with KT's built-in
+        lua ``mapload`` function.
+
+    .. py:method:: serialize_list(l)
+
+        :param list l: arbitrary data.
+        :return: serialized data.
+
+        Serialize a ``list`` as a sequence of bytes compatible with KT's
+        built-in lua ``arraydump`` function.
+
+    .. py:method:: deserialize_list(data, decode_values=True)
+
+        :param bytes data: serialized data.
+        :param bool decode_values: decode values to unicode strings.
+        :return: data ``list``.
+
+        Deserialize a a sequence of bytes into a list, optionally decoding the
+        values as unicode strings. Compatible with KT's built-in lua
+        ``arrayload`` function.
 
     .. py:method:: get_bulk(keys, db=None, decode_values=True)
 
-        :param list keys: keys to retrieve
-        :param int db: database index
+        :param list keys: keys to retrieve.
+        :param int db: database index.
         :param bool decode_values: decode values using the configured
             serialization scheme.
         :return: result dictionary
@@ -68,43 +107,21 @@ Kyoto Tycoon client
         Efficiently retrieve multiple key/value pairs from the database. If a
         key does not exist, it will not be present in the result dictionary.
 
-    .. py:method:: get_bulk_details(keys, db=None, decode_values=True)
+    .. py:method:: get_bulk_details(db_key_list, decode_values=True)
 
-        :param list keys: keys to retrieve
-        :param int db: database index
+        :param list db_key_list: a list of ``(db, key)`` tuples to fetch.
         :param bool decode_values: decode values using the configured
             serialization scheme.
-        :return: List of tuples: ``(db index, key, value, expire time)``
+        :return: list of tuples: ``(db index, key, value, expire time)``
 
         Like :py:meth:`~KyotoTycoon.get_bulk`, but the return value is a list
         of tuples with additional information for each key.
 
-    .. py:method:: get_bulk_raw(db_key_list, decode_values=True)
-
-        :param db_key_list: a list of 2-tuples to retrieve: ``(db index, key)``
-        :param bool decode_values: decode values using the configured
-            serialization scheme.
-        :return: result dictionary
-
-        Like :py:meth:`~KyotoTycoon.get_bulk`, except it supports fetching
-        key/value pairs from multiple databases. The input is a list of
-        2-tuples consisting of ``(db, key)`` and the return value is a
-        dictionary of ``key: value`` pairs.
-
-    .. py:method:: get_bulk_raw_details(db_key_list, decode_values=True)
-
-        :param db_key_list: a list of 2-tuples to retrieve: ``(db index, key)``
-        :param bool decode_values: decode values using the configured
-            serialization scheme.
-        :return: List of tuples: ``(db index, key, value, expire time)``
-
-        Like :py:meth:`~KyotoTycoon.get_bulk_raw`, but the return value is a
-        list of tuples with additional information for each key.
-
-    .. py:method:: get(key, db=None)
+    .. py:method:: get(key, db=None, decode_value=True)
 
         :param str key: key to look-up
         :param int db: database index
+        :param bool decode_value: decode value using serializer.
         :return: deserialized value or ``None`` if key does not exist.
 
         Fetch and (optionally) deserialize the value for the given key.
@@ -147,29 +164,18 @@ Kyoto Tycoon client
         key/value pairs in multiple databases in a single call, and each key
         can specify its own expire time.
 
-    .. py:method:: set(key, value, db=None, expire_time=None, no_reply=False)
+    .. py:method:: set(key, value, db=None, expire_time=None, no_reply=False, encode_value=True)
 
-        :param str key: key to set
-        :param value: value to store (will be serialized using serializer)
-        :param int db: database index
-        :param int expire_time: expiration time in seconds
+        :param str key: key to set.
+        :param value: value to store.
+        :param int db: database index.
+        :param int expire_time: expiration time in seconds.
         :param bool no_reply: execute the operation without a server
             acknowledgment.
+        :param bool encode_value: encode value using serializer.
         :return: number of rows set (1)
 
         Set a single key/value pair.
-
-    .. py:method:: set_bytes(key, value, db=None, expire_time=None, no_reply=False)
-
-        :param str key: key to set
-        :param value: raw value to store
-        :param int db: database index
-        :param int expire_time: expiration time in seconds
-        :param bool no_reply: execute the operation without a server
-            acknowledgment.
-        :return: number of rows set (1)
-
-        Set a single key/value pair without encoding the value.
 
     .. py:method:: remove_bulk(keys, db=None, no_reply=False)
 
@@ -199,13 +205,13 @@ Kyoto Tycoon client
 
     .. py:method:: script(name, data=None, no_reply=False, encode_values=True, decode_values=True)
 
-        :param str name: name of lua function to call
+        :param str name: name of lua function to call.
         :param dict data: mapping of key/value pairs to pass to lua function.
         :param bool no_reply: execute the operation without a server
             acknowledgment.
         :param bool encode_values: serialize values passed to lua function.
         :param bool decode_values: deserialize values returned by lua function.
-        :return: dictionary of key/value pairs returned by function
+        :return: dictionary of key/value pairs returned by function.
 
         Execute a lua function. Kyoto Tycoon lua extensions accept arbitrary
         key/value pairs as input, and return a result dictionary. If
@@ -213,12 +219,12 @@ Kyoto Tycoon client
         Likewise, if ``decode_values`` is ``True`` the values returned by the
         Lua function will be deserialized using the configured serializer.
 
-    .. py:method:: clear(db=None)
+    .. py:method:: report()
 
-        :param int db: database index
-        :return: boolean indicating success
+        :return: status fields and values
+        :rtype: dict
 
-        Remove all keys from the database.
+        Obtain report on overall status of server, including all databases.
 
     .. py:method:: status(db=None)
 
@@ -228,12 +234,167 @@ Kyoto Tycoon client
 
         Obtain status information from the server about the selected database.
 
-    .. py:method:: report()
+    .. py:method:: clear(db=None)
 
-        :return: status fields and values
-        :rtype: dict
+        :param int db: database index
+        :return: boolean indicating success
 
-        Obtain report on overall status of server, including all databases.
+        Remove all keys from the database.
+
+    .. py:method:: synchronize(hard=False, command=None, db=None)
+
+        :param bool hard: perform a "hard" synchronization.
+        :param str command: command to execute after synchronization.
+        :param int db: database index.
+        :return: boolean indicating success.
+
+        Synchronize the database, optionally executing the given command upon
+        success. This can be used to create hot backups, for example.
+
+    .. py:method:: add(key, value, db=None, expire_time=None, encode_value=True)
+
+        :param str key: key to add.
+        :param value: value to store.
+        :param int db: database index.
+        :param int expire_time: expiration time in seconds.
+        :param bool encode_value: serialize the value using the configured
+            serialization method.
+        :return: boolean indicating if key could be added or not.
+        :rtype: bool
+
+        Add a key/value pair to the database. This operation will only succeed
+        if the key does not already exist in the database.
+
+    .. py:method:: replace(key, value, db=None, expire_time=None, encode_value=True)
+
+        :param str key: key to replace.
+        :param value: value to store.
+        :param int db: database index.
+        :param int expire_time: expiration time in seconds.
+        :param bool encode_value: serialize the value using the configured
+            serialization method.
+        :return: boolean indicating if key could be replaced or not.
+        :rtype: bool
+
+        Replace a key/value pair to the database. This operation will only
+        succeed if the key alreadys exist in the database.
+
+    .. py:method:: append(key, value, db=None, expire_time=None, encode_value=True)
+
+        :param str key: key to append value to.
+        :param value: data to append.
+        :param int db: database index.
+        :param int expire_time: expiration time in seconds.
+        :param bool encode_value: serialize the value using the configured
+            serialization method.
+        :return: boolean indicating if value was appended.
+        :rtype: bool
+
+        Appends data to an existing key/value pair. If the key does not exist,
+        this is equivalent to :py:meth:`~KyotoTycoon.set`.
+
+    .. py:method:: increment(key, n=1, orig=None, db=None, expire_time=None)
+
+        :param str key: key to increment.
+        :param int n: value to add.
+        :param int orig: default value if key does not exist.
+        :param int db: database index.
+        :param int expire_time: expiration time in seconds.
+        :return: new value at key.
+        :rtype: int
+
+        Increment the value stored in the given key.
+
+    .. py:method:: increment_double(key, n=1., orig=None, db=None, expire_time=None)
+
+        :param str key: key to increment.
+        :param float n: value to add.
+        :param float orig: default value if key does not exist.
+        :param int db: database index.
+        :param int expire_time: expiration time in seconds.
+        :return: new value at key.
+        :rtype: float
+
+        Increment the floating-point value stored in the given key.
+
+    .. py:method:: cas(key, old_val, new_val, db=None, expire_time=None, encode_value=True)
+
+        :param str key: key to append value to.
+        :param old_val: original value to test.
+        :param new_val: new value to store.
+        :param int db: database index.
+        :param int expire_time: expiration time in seconds.
+        :param bool encode_value: serialize the old and new values using the
+            configured serialization method.
+        :return: boolean indicating if compare-and-swap succeeded.
+        :rtype: bool
+
+        Perform an atomic compare-and-set the value stored at a given key.
+
+    .. py:method:: exists(key, db=None)
+
+        :param str key: key to test.
+        :param int db: database index.
+        :return: boolean indicating if key exists.
+
+        Return whether or not the given key exists in the database.
+
+    .. py:method:: length(key, db=None)
+
+        :param str key: key.
+        :param int db: database index.
+        :return: length of the value in bytes, or ``None`` if not found.
+
+        Return the length of the raw value stored at the given key. If the key
+        does not exist, returns ``None``.
+
+    .. py:method:: seize(key, db=None, decode_value=True)
+
+        :param str key: key to remove.
+        :param int db: database index.
+        :param bool decode_value: deserialize the value using the configured
+            serialization method.
+        :return: value stored at given key or ``None`` if key does not exist.
+
+        Perform atomic get-and-remove the value stored in a given key.
+
+    .. py:method:: vacuum(step=0, db=None)
+
+        :param int step: number of steps, default is 0
+        :param int db: database index
+        :return: boolean indicating success
+
+    .. py:method:: match_prefix(prefix, max_keys=None, db=None)
+
+        :param str prefix: key prefix to match.
+        :param int max_keys: maximum number of results to return (optional).
+        :param int db: database index.
+        :return: list of keys that matched the given prefix.
+        :rtype: list
+
+        Return sorted list of keys that match the given prefix.
+
+    .. py:method:: match_regex(regex, max_keys=None, db=None)
+
+        :param str regex: regular-expression to match
+        :param int max_keys: maximum number of results to return (optional)
+        :param int db: database index
+        :return: list of keys that matched the given regular expression.
+        :rtype: list
+
+        Return sorted list of keys that match the given regular expression.
+
+    .. py:method:: match_similar(origin, distance=None, max_keys=None, db=None)
+
+        :param str origin: source string for comparison
+        :param int distance: maximum edit-distance for similarity (optional)
+        :param int max_keys: maximum number of results to return (optional)
+        :param int db: database index
+        :return: list of keys that were within a certain edit-distance of origin
+        :rtype: list
+
+        Return sorted list of keys that are within a given edit distance from
+        a string.
 
     .. py:method:: ulog_list()
 
@@ -259,128 +420,23 @@ Kyoto Tycoon client
 
         Removes all update-log files older than the given datetime.
 
-    .. py:method:: synchronize(hard=False, command=None, db=None)
+    .. py:method:: count(db=None)
 
-        :param bool hard: perform a "hard" synchronization
-        :param str command: command to run after synchronization
-        :param int db: database index
-        :return: boolean indicating success
-
-        Synchronize the database, optionally executing the given command upon
-        success. This can be used to create hot backups, for example.
-
-    .. py:method:: vacuum(step=0, db=None)
-
-        :param int step: number of steps, default is 0
-        :param int db: database index
-        :return: boolean indicating success
-
-    .. py:method:: add(key, value, db=None, expire_time=None, encode_value=True)
-
-        :param str key: key to add
-        :param value: value to store
-        :param int db: database index
-        :param int expire_time: expiration time in seconds
-        :param bool encode_value: serialize the value using the configured
-            serialization method.
-        :return: boolean indicating if key could be added or not
-        :rtype: bool
-
-        Add a key/value pair to the database. This operation will only succeed
-        if the key does not already exist in the database.
-
-    .. py:method:: replace(key, value, db=None, expire_time=None, encode_value=True)
-
-        :param str key: key to replace
-        :param value: value to store
-        :param int db: database index
-        :param int expire_time: expiration time in seconds
-        :param bool encode_value: serialize the value using the configured
-            serialization method.
-        :return: boolean indicating if key could be replaced or not
-        :rtype: bool
-
-        Replace a key/value pair to the database. This operation will only
-        succeed if the key alreadys exist in the database.
-
-    .. py:method:: append(key, value, db=None, expire_time=None, encode_value=True)
-
-        :param str key: key to append value to
-        :param value: data to append
-        :param int db: database index
-        :param int expire_time: expiration time in seconds
-        :param bool encode_value: serialize the value using the configured
-            serialization method.
-        :return: boolean indicating if value was appended
-        :rtype: bool
-
-        Appends data to an existing key/value pair. If the key does not exist,
-        this is equivalent to :py:meth:`~KyotoTycoon.set`.
-
-    .. py:method:: exists(key, db=None)
-
-        :param str key: key to test
-        :param int db: database index
-        :return: boolean indicating if key exists
-
-        Return whether or not the given key exists in the database.
-
-    .. py:method:: length(key, db=None)
-
-        :param str key: key
-        :param int db: database index
-        :return: length of the value in bytes, or ``None`` if not found
-
-        Return the length of the raw value stored at the given key. If the key
-        does not exist, returns ``None``.
-
-    .. py:method:: seize(key, db=None, decode_value=True)
-
-        :param str key: key to remove
-        :param int db: database index
-        :param bool decode_value: deserialize the value using the configured
-            serialization method.
-        :return: value stored at given key or ``None`` if key does not exist.
-
-        Get and remove the data stored in a given key in a single operation.
-
-    .. py:method:: cas(key, old_val, new_val, db=None, expire_time=None, encode_value=True)
-
-        :param str key: key to append value to
-        :param old_val: original value to test
-        :param new_val: new value to store
-        :param int db: database index
-        :param int expire_time: expiration time in seconds
-        :param bool encode_value: serialize the old and new values using the
-            configured serialization method.
-        :return: boolean indicating if compare-and-swap succeeded.
-        :rtype: bool
-
-        Compare-and-swap the value stored at a given key.
-
-    .. py:method:: incr(key, n=1, orig=None, db=None, expire_time=None)
-
-        :param str key: key to increment
-        :param int n: value to add
-        :param int orig: default value if key does not exist
-        :param int db: database index
-        :param int expire_time: expiration time in seconds
-        :return: new value at key
+        :param db: database index
+        :type db: int or None
+        :return: total number of keys in the database.
         :rtype: int
 
-        Increment the value stored in the given key.
+        Count total number of keys in the database.
 
-    .. py:method:: incr_double(key, n=1., orig=None, db=None, expire_time=None)
+    .. py:method:: size(db=None)
 
-        :param str key: key to increment
-        :param float n: value to add
-        :param float orig: default value if key does not exist
-        :param int db: database index
-        :param int expire_time: expiration time in seconds
-        :return: new value at key
-        :rtype: float
+        :param db: database index
+        :type db: int or None
+        :return: size of database in bytes.
 
-        Increment the floating-point value stored in the given key.
+        Property which exposes the size information returned by the
+        :py:meth:`~KyotoTycoon.status` API.
 
     .. py:method:: __getitem__(key_or_keydb)
 
@@ -409,53 +465,21 @@ Kyoto Tycoon client
         :return: total number of keys in the default database.
         :rtype: int
 
-    .. py:method:: count(db=None)
+    .. py:method:: update(__data=None, **kwargs)
 
-        :param db: database index
-        :type db: int or None
-        :return: total number of keys in the database.
-        :rtype: int
+        :param dict __data: optionally provide data as a dictionary.
+        :param kwargs: provide data as keyword arguments.
+        :return: number of keys that were set.
 
-        Count total number of keys in the database.
-
-    .. py:method:: update(__data=None, db=None, expire_time=None, no_reply=False, encode_values=True, **kwargs)
-
-        Efficiently set multiple key/value pairs. If given, the provided ``db``
-        and ``expire_time`` values will be used for all key/value pairs being
-        set.
-
-        See :py:meth:`KyotoTycoon.set_bulk` for details.
+        Efficiently set or update multiple key/value pairs. Provided for
+        compatibility with ``dict`` interface. For more control use the
+        :py:meth:`~KyotoTycoon.set_bulk`.
 
     .. py:method:: pop(key, db=None, decode_value=True)
 
         Get and remove the data stored in a given key in a single operation.
 
         See :py:meth:`KyotoTycoon.seize`.
-
-    .. py:method:: match_prefix(prefix, max_keys=None, db=None)
-
-        :param str prefix: key prefix to match
-        :param int max_keys: maximum number of results to return (optional)
-        :param int db: database index
-        :return: list of keys that matched the given prefix.
-        :rtype: list
-
-    .. py:method:: match_regex(regex, max_keys=None, db=None)
-
-        :param str regex: regular-expression to match
-        :param int max_keys: maximum number of results to return (optional)
-        :param int db: database index
-        :return: list of keys that matched the given regular expression.
-        :rtype: list
-
-    .. py:method:: match_similar(origin, distance=None, max_keys=None, db=None)
-
-        :param str origin: source string for comparison
-        :param int distance: maximum edit-distance for similarity (optional)
-        :param int max_keys: maximum number of results to return (optional)
-        :param int db: database index
-        :return: list of keys that were within a certain edit-distance of origin
-        :rtype: list
 
     .. py:method:: cursor(db=None, cursor_id=None)
 
@@ -471,7 +495,7 @@ Kyoto Tycoon client
 
         .. warning::
             The :py:meth:`~KyotoCabinet.keys` method uses a cursor and can be
-            rather slow.
+            very slow.
 
     .. py:method:: keys_nonlazy(db=None)
 
@@ -495,33 +519,105 @@ Kyoto Tycoon client
         :return: all key/value tuples in database
         :rtype: generator
 
-    .. py:attribute:: size
 
-        Property which exposes the size information returned by the
-        :py:meth:`~KyotoTycoon.status` API, for the default database.
+.. py:class:: Cursor(protocol, cursor_id, db=None)
 
-    .. py:attribute:: path
+    :param KyotoTycoon protocol: client instance.
+    :param int cursor_id: cursor unique identifier.
+    :param int db: database index.
+    :param bool decode_values: decode values using client serializer when
+        reading from the cursor.
+    :param bool encode_values: encode values using client serializer when
+        writing to the cursor.
 
-        Property which exposes the filename/path returned by the
-        :py:meth:`~KyotoTycoon.status` API, for the default database.
+    Create a helper for working with the database using the cursor interface.
 
-    .. py:method:: set_database(db)
+    .. py:method:: jump(key=None)
 
-        :param int db: database index
+        :param str key: key to jump to or ``None``.
+        :return: boolean indicating success.
 
-        Specify the default database index for the client.
+        Jump to the given key. If not provided, will jump to the first key in
+        the database.
+
+    .. py:method:: jump_back(key=None)
+
+        :param str key: key to jump backwards to or ``None``.
+        :return: boolean indicating success.
+
+        Jump backwards to the given key. If not provided, will jump to the last
+        key in the database.
+
+    .. py:method:: step()
+
+        :return: boolean indicating success.
+
+        Step to the next key. Returns ``False`` when past the last key of the
+        database.
+
+    .. py:method:: step_back()
+
+        :return: boolean indicating success.
+
+        Step to the previous key. Returns ``False`` when past the first key of
+        the database.
+
+    .. py:method:: key(step=False)
+
+        :param bool step: step to next record after reading.
+        :return: key of the currently-selected record.
+
+    .. py:method:: value(step=False)
+
+        :param bool step: step to next record after reading.
+        :return: value of the currently-selected record.
+
+    .. py:method:: get(step=False)
+
+        :param bool step: step to next record after reading.
+        :return: ``(key, value)`` of the currently-selected record.
+
+    .. py:method:: set_value(value, step=False, expire_time=None)
+
+        :param value: value to set
+        :param bool step: step to next record after writing.
+        :param int expire_time: optional expire time for record.
+        :return: boolean indicating success.
+
+        Set the value at the currently-selected record.
+
+    .. py:method:: remove()
+
+        :return: boolean indicating success.
+
+        Remove the currently-selected record.
+
+    .. py:method:: seize(step=False)
+
+        :param bool step: step to next record after writing.
+        :return: ``(key, value)`` of the currently-selected record.
+
+        Get and remove the currently-selected record.
+
+    .. py:method:: close()
+
+        :return: boolean indicating success.
+
+        Close the cursor.
 
 
 Embedded Servers
 ----------------
 
-.. py:class:: EmbeddedServer(server='ktserver', host='127.0.0.1', port=None, database='*', server_args=None)
+.. py:class:: EmbeddedServer(server='ktserver', host='127.0.0.1', port=None, database='*', serializer=None, server_args=None, quiet=False)
 
-    :param str server: path to ktserver executable
-    :param str host: host to bind server on
-    :param int port: port to use (optional)
-    :param str database: database filename, default is in-memory hash table
+    :param str server: path to ktserver executable.
+    :param str host: host to bind server on.
+    :param int port: port to use (optional).
+    :param str database: database filename, default is in-memory hash table.
+    :param serializer: serializer to use, e.g. ``KT_BINARY`` or ``KT_MSGPACK``.
     :param list server_args: additional command-line arguments for server
+    :param bool quiet: minimal logging and output.
 
     Create a manager for running an embedded (sub-process) Kyoto Tycoon server.
     If the port is not specified, a random high port will be used.

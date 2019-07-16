@@ -151,4 +151,3 @@ class EmbeddedServer(object):
                 pass
 
         raise KTError('Could not find open port')
-

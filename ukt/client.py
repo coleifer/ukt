@@ -268,6 +268,21 @@ KT_PICKLE = 'pickle'
 
 
 class KyotoTycoon(object):
+    """
+    Kyoto Tycoon client.
+
+    :param str host: ktserver host.
+    :param int port: ktserver port.
+    :param int timeout: socket timeout for database connection.
+    :param int default_db: default database index.
+    :param bool decode_keys: decode keys as utf8-encoded unicode.
+    :param serializer: value serialization. Default is KT_BINARY, which treats
+        values as utf8-encoded unicode. To disable serialization use KT_NONE.
+        Other serializers: KT_JSON, KT_MSGPACK and KT_PICKLE.
+    :param encode_value: custom serializer for encoding values as bytestrings.
+    :param decode_value: custom deserializer for decoding bytestrings.
+    :param int max_age: max idle time for socket in connection pool.
+    """
     _content_type = 'text/tab-separated-values; colenc=B'
     _cursor_id = 0
 
@@ -1115,18 +1130,21 @@ class KyotoTycoon(object):
         resp, status = self._cursor_command('cur_delete', cursor_id, {})
         return status == 200
 
-    def cursor(self, cursor_id=None, db=None):
+    def cursor(self, cursor_id=None, db=None, decode_values=True,
+               encode_values=True):
         """
         Obtain a cursor for iterating over the database.
 
         :param int cursor_id: optional ID for cursor.
         :param int db: database index.
+        :param bool decode_values: decode values read from the cursor.
+        :param bool encode_values: encode values written using the cursor.
         :return: a :py:class:`Cursor`.
         """
         if cursor_id is None:
             KyotoTycoon._cursor_id += 1
             cursor_id = KyotoTycoon._cursor_id
-        return Cursor(self, cursor_id, db)
+        return Cursor(self, cursor_id, db, decode_values, encode_values)
 
     def ulog_list(self):
         resp, status = self._request('/ulog_list', {}, None, decode_keys=True)
@@ -1223,10 +1241,13 @@ class KyotoTycoon(object):
 
 
 class Cursor(object):
-    def __init__(self, protocol, cursor_id, db=None):
+    def __init__(self, protocol, cursor_id, db=None, decode_values=True,
+                 encode_values=True):
         self.protocol = protocol
         self.cursor_id = cursor_id
         self.db = db
+        self._decode_values = decode_values
+        self._encode_values = encode_values
         self._valid = False
 
     def __iter__(self):
@@ -1253,21 +1274,25 @@ class Cursor(object):
         self._valid = self.protocol.cur_step_back(self.cursor_id)
         return self._valid
 
-    def key(self):
+    def key(self, step=False):
         if self._valid:
-            return self.protocol.cur_get_key(self.cursor_id)
+            return self.protocol.cur_get_key(self.cursor_id, step)
 
-    def value(self):
+    def value(self, step=False):
         if self._valid:
-            return self.protocol.cur_get_value(self.cursor_id)
+            return self.protocol.cur_get_value(self.cursor_id, step,
+                                               self._decode_values)
 
-    def get(self):
+    def get(self, step=False):
         if self._valid:
-            return self.protocol.cur_get(self.cursor_id)
+            return self.protocol.cur_get(self.cursor_id, step,
+                                         self._decode_values)
 
-    def set_value(self, value):
+    def set_value(self, value, step=False, expire_time=None):
         if self._valid:
-            if not self.protocol.cur_set_value(self.cursor_id, value):
+            if not self.protocol.cur_set_value(self.cursor_id, value, step,
+                                               expire_time,
+                                               self._encode_values):
                 self._valid = False
         return self._valid
 
@@ -1277,9 +1302,10 @@ class Cursor(object):
                 self._valid = False
         return self._valid
 
-    def seize(self):
+    def seize(self, step=False):
         if self._valid:
-            kv = self.protocol.cur_seize(self.cursor_id)
+            kv = self.protocol.cur_seize(self.cursor_id, step,
+                                         self._decode_values)
             if kv is None:
                 self._valid = False
             return kv
