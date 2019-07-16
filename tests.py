@@ -2,6 +2,7 @@
 
 import functools
 import os
+import pickle
 import sys
 import threading
 import time
@@ -255,18 +256,14 @@ class KyotoTycoonTests(object):
 
 
 class TestKyotoTycoonHash(KyotoTycoonTests, BaseTestCase):
-    server = EmbeddedServer
     server_kwargs = {'database': '*'}
 
 
-
 class TestKyotoTycoonBTree(KyotoTycoonTests, BaseTestCase):
-    server = EmbeddedServer
     server_kwargs = {'database': '%'}
 
 
 class TestKyotoTycoonCursor(BaseTestCase):
-    server = EmbeddedServer
     server_kwargs = {'database': '%'}
 
     def setUp(self):
@@ -371,7 +368,6 @@ class TestKyotoTycoonCursor(BaseTestCase):
 
 
 class TestKyotoTycoonSerializers(BaseTestCase):
-    server = EmbeddedServer
     server_kwargs = {'database': '*'}
 
     def get_client(self, serializer):
@@ -432,7 +428,6 @@ class TestKyotoTycoonSerializers(BaseTestCase):
 
 class TestKyotoTycoonScripting(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
-    server = EmbeddedServer
     server_kwargs = {
         'database': '%',
         'server_args': ['-scr', lua_script]}
@@ -810,28 +805,29 @@ class TestKyotoTycoonScripting(BaseTestCase):
         self.assertEqual(len(qa), 20)
         self.assertEqual(len(qb), 20)
 
-        self.assertEqual(qa.pop(), 'i0')
-        self.assertEqual(qa.rpop(), 'i19')
-        self.assertEqual(qa.pop(n=3), ['i1', 'i2', 'i3'])
-        self.assertEqual(qa.rpop(n=3), ['i18', 'i17', 'i16'])
-        self.assertEqual(qa.peek(n=3), ['i4', 'i5', 'i6'])
-        self.assertEqual(qa.rpeek(n=3), ['i15', 'i14', 'i13'])
+        self.assertEqual(qa.pop(), b'i0')
+        self.assertEqual(qa.rpop(), b'i19')
+        self.assertEqual(qa.pop(n=3), [b'i1', b'i2', b'i3'])
+        self.assertEqual(qa.rpop(n=3), [b'i18', b'i17', b'i16'])
+        self.assertEqual(qa.peek(n=3), [b'i4', b'i5', b'i6'])
+        self.assertEqual(qa.rpeek(n=3), [b'i15', b'i14', b'i13'])
 
         # i0, i1, i2, i3 ... x5.
         self.assertEqual(qb.remove('i1', n=4), 4)
         self.assertEqual(qb.rremove('i2', n=4), 4)
         self.assertEqual(len(qb), 12)
-        self.assertEqual(qb.peek(20), ['i0', 'i2', 'i3', 'i0', 'i3', 'i0',
-                                       'i3', 'i0', 'i3', 'i0', 'i1', 'i3'])
+        self.assertEqual(qb.peek(20), [b'i0', b'i2', b'i3', b'i0', b'i3',
+                                       b'i0', b'i3', b'i0', b'i3', b'i0',
+                                       b'i1', b'i3'])
         self.assertEqual(qb.remove('i3', n=5), 5)
         self.assertEqual(qb.remove('i0', n=10), 5)
-        self.assertEqual(qb.pop(), 'i2')
-        self.assertEqual(qb.pop(), 'i1')
+        self.assertEqual(qb.pop(), b'i2')
+        self.assertEqual(qb.pop(), b'i1')
         self.assertEqual(len(qb), 0)
 
         self.assertEqual(qa.remove('i7'), 1)
         self.assertEqual(qa.remove('i7'), 0)
-        self.assertEqual(qa.pop(n=5), ['i4', 'i5', 'i6', 'i8', 'i9'])
+        self.assertEqual(qa.pop(n=5), [b'i4', b'i5', b'i6', b'i8', b'i9'])
 
     def test_hexastore(self):
         L = self.db.lua
@@ -915,9 +911,27 @@ class TestKyotoTycoonScripting(BaseTestCase):
         db2.close_all()
 
 
+class TestKyotoTycoonScriptingSerialization(BaseTestCase):
+    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
+    server_kwargs = {
+        'serializer': KT_PICKLE,
+        'database': '%',
+        'server_args': ['-scr', lua_script]}
+
+    def test_queue_pickle(self):
+        q = Queue(self.db, 'queue')
+        data = [{'item': 'i%s' % i} for i in range(3)]
+        serialized = [pickle.dumps(item) for item in data]
+        q.add(serialized[0])
+        q.extend(serialized[1:])
+
+        self.assertEqual(pickle.loads(q.pop()), {'item': 'i0'})
+        vals = [pickle.loads(i) for i in q.rpop(2)]
+        self.assertEqual(vals, [{'item': 'i2'}, {'item': 'i1'}])
+
+
 class TestKyotoTycoonScriptingMultiDB(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
-    server = EmbeddedServer
     server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '%']}
 
     def test_script_multi_db(self):
@@ -984,7 +998,6 @@ class TestKyotoTycoonScriptingMultiDB(BaseTestCase):
 
 class TestKyotoTycoonMultiDatabase(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
-    server = EmbeddedServer
     server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '*']}
 
     def tearDown(self):
@@ -1160,7 +1173,6 @@ class TestKyotoTycoonMultiDatabase(BaseTestCase):
 
 
 class TestMultipleThreads(BaseTestCase):
-    server = EmbeddedServer
     server_kwargs = {'database': '*'}
 
     def test_multiple_threads(self):
@@ -1182,7 +1194,6 @@ class TestMultipleThreads(BaseTestCase):
 
 
 class TestConnectionPool(BaseTestCase):
-    server = EmbeddedServer
     server_kwargs = {'database': '*'}
 
     def test_connection_pool(self):

@@ -9,7 +9,8 @@ class Queue(object):
 
     def _lua(self, fn, **kwargs):
         kwargs.update(queue=self._key, db=self._db)
-        return self._client.script(fn, kwargs)
+        return self._client.script(fn, kwargs, encode_values=False,
+                                   decode_values=False)
 
     def add(self, item):
         return int(self._lua('queue_add', data=item)['id'])
