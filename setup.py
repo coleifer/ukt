@@ -33,15 +33,11 @@ serializer = Extension(
     sources=[python_source])
 
 
-with open(os.path.join(os.path.dirname(__file__), 'README.md')) as fh:
-    readme = fh.read()
-
-
 setup(
     name='ukt',
     version=__version__,
     description='lightweight kyototycoon client',
-    long_description=readme,
+    long_description='lightweight kyototycoon client',
     author='Charles Leifer',
     author_email='',
     url='http://github.com/coleifer/ukt/',
