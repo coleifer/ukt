@@ -24,6 +24,7 @@ ukt
    installation
    usage
    api
+   tuning
 
 
 Indices and tables
