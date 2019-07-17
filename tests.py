@@ -393,7 +393,20 @@ class TestKyotoTycoonSerializers(BaseTestCase):
         db.set('k2', '')
         self.assertEqual(db.get('k2'), '')
 
-        self.assertEqual(db.get_bulk(['k1', 'k2']), {'k1': obj, 'k2': ''})
+        self.assertEqual(db.set_bulk({'k3': None, 'k4': 0}), 2)
+
+        self.assertEqual(db.get_bulk(['k1', 'k2', 'k3', 'k4']), {
+            'k1': obj,
+            'k2': '',
+            'k3': None,
+            'k4': 0})
+
+        # Use HTTP APIs as well.
+        l = ['foo', 'bar']
+        db.replace('k3', l)
+        self.assertEqual(db.get('k3'), l)
+        self.assertTrue(db.cas('k3', l, ['new', 'list']))
+        self.assertEqual(db.get('k3'), ['new', 'list'])
 
     def test_serializer_json(self):
         self._test_serializer_object(KT_JSON)
