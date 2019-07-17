@@ -156,6 +156,36 @@ class KyotoTycoonTests(object):
                          {'k1': 'v1-x', 'k3': 'v3'})
         self.assertEqual(self.db.remove_bulk_http(['k1', 'k2', 'k3']), 2)
 
+    def test_http_signal(self):
+        evt = threading.Event()
+        def wait_get():
+            evt.set()
+            val = self.db.get_http('k1', signal='sig1', wait=3)
+            self.assertEqual(val, 'v1-x')
+        t = threading.Thread(target=wait_get)
+        t.start()
+
+        evt.wait()  # Wait til thread starts up to make the call.
+        r = self.db.set_bulk_http({'k1': 'v1-x', 'k2': 'v2-y'}, signal='sig1',
+                                  send=True)
+        t.join()
+        self.assertEqual(r, 2)
+        evt.clear()
+
+        def wait_seize():
+            evt.set()
+            val = self.db.seize('k1', signal='sig2', wait=3)
+            self.assertEqual(val, 'v1-z')
+        t = threading.Thread(target=wait_seize)
+        t.start()
+
+        evt.wait()
+        r = self.db.set_http('k1', 'v1-z', signal='sig2', send=True)
+        t.join()
+
+        self.assertEqual(self.db.count(), 1)
+        self.assertEqual(self.db.keys_nonlazy(), ['k2'])
+
     def test_noreply(self):
         self.assertTrue(self.db.set('k1', 'v1', no_reply=True) is None)
         self.assertEqual(self.db.get('k1'), 'v1')

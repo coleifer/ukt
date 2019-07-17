@@ -757,36 +757,36 @@ class KyotoTycoon(object):
 
     # HTTP API.
 
-    def report(self):
+    def report(self, **kw):
         """
         Request report from the server.
 
         :return: a dictionary of metadata about the server state.
         """
-        resp, status = self._request('/report', {}, None)
+        resp, status = self._request('/report', {}, None, **kw)
         return resp
 
-    def status(self, db=None):
+    def status(self, db=None, **kw):
         """
         Request status from the server for the given database.
 
         :param int db: database index.
         :return: a dictionary of metadata about the database.
         """
-        resp, status = self._request('/status', {}, db, decode_keys=True)
+        resp, status = self._request('/status', {}, db, decode_keys=True, **kw)
         return resp
 
-    def clear(self, db=None):
+    def clear(self, db=None, **kw):
         """
         Remove all data from the database.
 
         :param int db: database index.
         :return: boolean indicating success.
         """
-        resp, status = self._request('/clear', {}, db)
+        resp, status = self._request('/clear', {}, db, **kw)
         return status == 200
 
-    def synchronize(self, hard=False, command=None, db=None):
+    def synchronize(self, hard=False, command=None, db=None, **kw):
         """
         Synchronize all data to disk.
 
@@ -800,14 +800,20 @@ class KyotoTycoon(object):
             data['hard'] = ''
         if command is not None:
             data['command'] = command
-        _, status = self._request('/synchronize', data, db)
+        _, status = self._request('/synchronize', data, db, **kw)
         return status == 200
 
-    def get_http(self, key, db=None, decode_value=True, signal=None,
-                 wait=None):
+    def get_http(self, key, db=None, decode_value=True, **kw):
+        """
+        Get a key using the HTTP API.
+
+        :param key: key.
+        :param int db: database index.
+        :param bool decode_value: decode value using serializer.
+        :return: value or None if not found.
+        """
         resp, status = self._request('/get', {'key': key}, db, (450,),
-                                     decode_keys=False, signal=signal,
-                                     wait=wait)
+                                     decode_keys=False, **kw)
         if status == 450:
             return
         value = resp[b'value']
@@ -815,22 +821,30 @@ class KyotoTycoon(object):
             value = self.decode_value(value)
         return value
 
-    def remove_http(self, key, db=None, signal=None):
+    def remove_http(self, key, db=None, **kw):
         """
         Remove a key using the HTTP API.
 
         :param key: key.
         :param int db: database index.
-        :param str signal: signal to send upon write.
         :return: number of records removed (1 or 0).
         """
         resp, status = self._request('/remove', {'key': key}, db, (450,),
-                                     decode_keys=False, signal=signal,
-                                     send=signal is not None)
+                                     decode_keys=False, **kw)
         return 0 if status == 450 else 1
 
     def set_bulk_http(self, data, db=None, expire_time=None, atomic=True,
-                      encode_values=True, signal=None):
+                      encode_values=True, **kw):
+        """
+        Set multiple key/value pairs in one operation using the HTTP API.
+
+        :param dict data: key/value mapping.
+        :param int db: database index.
+        :param long expire_time: expire time in seconds.
+        :param bool atomic: set all data in a single operation.
+        :param bool encode_values: serialize values.
+        :return: number of records set.
+        """
         accum = {}
         if expire_time is not None:
             accum['xt'] = str(expire_time)
@@ -840,34 +854,35 @@ class KyotoTycoon(object):
             accum['_%s' % key] = value
 
         resp, status = self._request('/set_bulk', accum, db, atomic=atomic,
-                                     signal=signal, send=signal is not None,
-                                     decode_keys=False)
-        num = int(resp[b'num'])
-        return num if signal is None else (num, int(resp[b'SIGNALED']))
+                                     decode_keys=False, **kw)
+        return int(resp[b'num'])
 
-    def remove_bulk_http(self, keys, db=None, atomic=True, signal=None):
+    def remove_bulk_http(self, keys, db=None, atomic=True, **kw):
+        """
+        Remove multiple keys using the HTTP API.
+
+        :param list keys: keys to remove.
+        :param int db: database index.
+        :param bool atomic: remove keys in a single operation.
+        :return: number of records removed.
+        """
         resp, status = self._request('/remove_bulk', keys, db, atomic=atomic,
-                                     signal=signal, send=signal is not None,
-                                     decode_keys=False)
-        num = int(resp[b'num'])
-        return num if signal is None else (num, int(resp[b'SIGNALED']))
+                                     decode_keys=False, **kw)
+        return int(resp[b'num'])
 
     def _simple_write(self, cmd, key, value, db=None, expire_time=None,
-                      encode_value=True, signal=None):
+                      encode_value=True, **kw):
         if encode_value:
             value = self.encode_value(value)
         data = {'key': key, 'value': value}
         if expire_time is not None:
             data['xt'] = str(expire_time)
-        send = signal is not None
         resp, status = self._request('/%s' % cmd, data, db, (450,),
-                                     signal=signal, send=send,
-                                     decode_keys=False)
-        ok = status != 450
-        return ok if signal is None else (ok, int(resp[b'SIGNALED']))
+                                     decode_keys=False, **kw)
+        return status != 450
 
     def set_http(self, key, value, db=None, expire_time=None,
-                 encode_value=True, signal=None):
+                 encode_value=True, **kw):
         """
         Set a single key/value pair using the HTTP API.
 
@@ -876,14 +891,13 @@ class KyotoTycoon(object):
         :param int db: database index.
         :param long expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
-        :param str signal: signal to send upon write.
         :return: True on success.
         """
         return self._simple_write('set', key, value, db, expire_time,
-                                  encode_value, signal)
+                                  encode_value, **kw)
 
     def add(self, key, value, db=None, expire_time=None, encode_value=True,
-            signal=None):
+            **kw):
         """
         Add a single key/value pair without overwriting an existing key.
 
@@ -892,14 +906,13 @@ class KyotoTycoon(object):
         :param int db: database index.
         :param long expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
-        :param str signal: signal to send upon write.
         :return: True on success.
         """
         return self._simple_write('add', key, value, db, expire_time,
-                                  encode_value, signal)
+                                  encode_value, **kw)
 
     def replace(self, key, value, db=None, expire_time=None,
-                encode_value=True, signal=None):
+                encode_value=True, **kw):
         """
         Replace a single key/value pair without creating a new key.
 
@@ -908,14 +921,13 @@ class KyotoTycoon(object):
         :param int db: database index.
         :param long expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
-        :param str signal: signal to send upon write.
         :return: True on success.
         """
         return self._simple_write('replace', key, value, db, expire_time,
-                                  encode_value, signal)
+                                  encode_value, **kw)
 
     def append(self, key, value, db=None, expire_time=None, encode_value=True,
-               signal=None):
+               **kw):
         """
         Append data to the value of a given key pair.
 
@@ -924,14 +936,12 @@ class KyotoTycoon(object):
         :param int db: database index.
         :param long expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
-        :param str signal: signal to send upon write.
         :return: True on success.
         """
         return self._simple_write('append', key, value, db, expire_time,
-                                  encode_value)
+                                  encode_value, **kw)
 
-    def increment(self, key, n=1, orig=None, db=None, expire_time=None,
-                  signal=None):
+    def increment(self, key, n=1, orig=None, db=None, expire_time=None, **kw):
         """
         Atomically increment the value stored in the given key.
 
@@ -940,7 +950,6 @@ class KyotoTycoon(object):
         :param int orig: original value if key does not exist.
         :param int db: database index.
         :param long expire_time: expire time in seconds from now.
-        :param str signal: signal to send upon write.
         :return: value after increment.
         """
         data = {'key': key, 'num': str(n)}
@@ -948,12 +957,12 @@ class KyotoTycoon(object):
             data['orig'] = str(orig)
         if expire_time is not None:
             data['xt'] = str(expire_time)
-        resp, status = self._request('/increment', data, db, decode_keys=False,
-                                     signal=signal, send=signal is not None)
+        resp, status = self._request('/increment', data, db,
+                                     decode_keys=False, **kw)
         return int(resp[b'num'])
 
     def increment_double(self, key, n=1, orig=None, db=None, expire_time=None,
-                         signal=None):
+                         **kw):
         """
         Atomically increment a double-precision value stored in the given key.
 
@@ -962,7 +971,6 @@ class KyotoTycoon(object):
         :param float orig: original value if key does not exist.
         :param int db: database index.
         :param long expire_time: expire time in seconds from now.
-        :param str signal: signal to send upon write.
         :return: value after increment.
         """
         data = {'key': key, 'num': str(n)}
@@ -971,12 +979,11 @@ class KyotoTycoon(object):
         if expire_time is not None:
             data['xt'] = str(expire_time)
         resp, status = self._request('/increment_double', data, db,
-                                     decode_keys=False, signal=signal,
-                                     send=signal is not None)
+                                     decode_keys=False, **kw)
         return float(resp[b'num'])
 
     def cas(self, key, old_val, new_val, db=None, expire_time=None,
-            encode_value=True, signal=None):
+            encode_value=True, **kw):
         """
         Perform an atomic compare-and-set.
 
@@ -986,7 +993,6 @@ class KyotoTycoon(object):
         :param int db: database index.
         :param long expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
-        :param str signal: signal to send upon write.
         :return: True on success.
         """
         if old_val is None and new_val is None:
@@ -1004,11 +1010,10 @@ class KyotoTycoon(object):
         if expire_time is not None:
             data['xt'] = str(expire_time)
 
-        resp, status = self._request('/cas', data, db, (450,), signal=signal,
-                                     send=signal is not None)
+        resp, status = self._request('/cas', data, db, (450,), **kw)
         return status != 450
 
-    def check(self, key, db=None):
+    def check(self, key, db=None, **kw):
         """
         Test if the given key exists.
 
@@ -1016,12 +1021,12 @@ class KyotoTycoon(object):
         :param int db: database index.
         :return: True if key exists.
         """
-        resp, status = self._request('/check', {'key': key}, db, (450,))
+        resp, status = self._request('/check', {'key': key}, db, (450,), **kw)
         return status != 450
 
     exists = check
 
-    def length(self, key, db=None):
+    def length(self, key, db=None, **kw):
         """
         Get the length of the value stored in the given key.
 
@@ -1030,24 +1035,21 @@ class KyotoTycoon(object):
         :return: length of value or None if key does not exist.
         """
         resp, status = self._request('/check', {'key': key}, db, (450,),
-                                     decode_keys=False)
+                                     decode_keys=False, **kw)
         if status == 200:
             return int(resp[b'vsiz'])
 
-    def seize(self, key, db=None, decode_value=True, signal=None, wait=None):
+    def seize(self, key, db=None, decode_value=True, **kw):
         """
         Atomic get and delete for a given key.
 
         :param key: key to pop.
         :param int db: database index.
         :param bool decode_value: deserialize the value after reading.
-        :param str signal: signal to wait for.
-        :param int wait: seconds to block.
         :return: value from database.
         """
         resp, status = self._request('/seize', {'key': key}, db, (450,),
-                                     decode_keys=False, signal=signal,
-                                     wait=wait)
+                                     decode_keys=False, **kw)
         if status == 450:
             return
         value = resp[b'value']
@@ -1055,7 +1057,7 @@ class KyotoTycoon(object):
             value = self.decode_value(value)
         return value
 
-    def vacuum(self, step=0, db=None):
+    def vacuum(self, step=0, db=None, **kw):
         """
         Vacuum the database.
 
@@ -1065,7 +1067,7 @@ class KyotoTycoon(object):
         """
         # If step > 0, the whole region is scanned.
         data = {'step': str(step)} if step > 0 else {}
-        resp, status = self._request('/vacuum', data, db)
+        resp, status = self._request('/vacuum', data, db, **kw)
         return status == 200
 
     def _do_bulk_command(self, cmd, params, db=None, decode_values=True, **kw):
@@ -1082,16 +1084,16 @@ class KyotoTycoon(object):
             accum[key[1:]] = value
         return accum
 
-    def _do_bulk_sorted_command(self, cmd, params, db=None):
-        results = self._do_bulk_command(cmd, params, db, decode_values=False)
-        return sorted(results, key=lambda k: int(results[k]))
+    def _do_bulk_sorted_command(self, cmd, params, db=None, **kw):
+        res = self._do_bulk_command(cmd, params, db, decode_values=False, **kw)
+        return sorted(res, key=lambda k: int(res[k]))
 
     def get_bulk_http(self, keys, db=None, decode_values=True, atomic=True,
-                      signal=None, wait=None):
+                      **kw):
         return self._do_bulk_command('/get_bulk', keys, db, decode_values,
-                                     atomic=atomic, signal=signal, wait=wait)
+                                     atomic=atomic, **kw)
 
-    def match_prefix(self, prefix, max_keys=None, db=None):
+    def match_prefix(self, prefix, max_keys=None, db=None, **kw):
         """
         Return sorted list of keys that match the given prefix.
 
@@ -1103,9 +1105,9 @@ class KyotoTycoon(object):
         data = {'prefix': prefix}
         if max_keys is not None:
             data['max'] = str(max_keys)
-        return self._do_bulk_sorted_command('/match_prefix', data, db)
+        return self._do_bulk_sorted_command('/match_prefix', data, db, **kw)
 
-    def match_regex(self, regex, max_keys=None, db=None):
+    def match_regex(self, regex, max_keys=None, db=None, **kw):
         """
         Return sorted list of keys that match the given regex.
 
@@ -1117,9 +1119,10 @@ class KyotoTycoon(object):
         data = {'regex': regex}
         if max_keys is not None:
             data['max'] = str(max_keys)
-        return self._do_bulk_sorted_command('/match_regex', data, db)
+        return self._do_bulk_sorted_command('/match_regex', data, db, **kw)
 
-    def match_similar(self, origin, distance=None, max_keys=None, db=None):
+    def match_similar(self, origin, distance=None, max_keys=None, db=None,
+                      **kw):
         """
         Return sorted list of keys that are within a given edit distance from
         a string.
@@ -1135,36 +1138,36 @@ class KyotoTycoon(object):
             data['range'] = str(distance)
         if max_keys is not None:
             data['max'] = str(max_keys)
-        return self._do_bulk_sorted_command('/match_similar', data, db)
+        return self._do_bulk_sorted_command('/match_similar', data, db, **kw)
 
-    def _cursor_command(self, cmd, cursor_id, data, db=None):
+    def _cursor_command(self, cmd, cursor_id, data, db=None, **kw):
         data['CUR'] = cursor_id
         resp, status = self._request('/%s' % cmd, data, db, (450, 501),
-                                    decode_keys=False)
+                                    decode_keys=False, **kw)
         if status == 501:
             raise NotImplementedError('%s is not supported' % cmd)
         return resp, status
 
-    def cur_jump(self, cursor_id, key=None, db=None):
+    def cur_jump(self, cursor_id, key=None, db=None, **kw):
         data = {'key': key} if key else {}
-        resp, s = self._cursor_command('cur_jump', cursor_id, data, db)
+        _, s = self._cursor_command('cur_jump', cursor_id, data, db, **kw)
         return s == 200
 
-    def cur_jump_back(self, cursor_id, key=None, db=None):
+    def cur_jump_back(self, cursor_id, key=None, db=None, **kw):
         data = {'key': key} if key else {}
-        resp, s = self._cursor_command('cur_jump_back', cursor_id, data, db)
+        _, s = self._cursor_command('cur_jump_back', cursor_id, data, db, **kw)
         return s == 200
 
-    def cur_step(self, cursor_id):
-        resp, status = self._cursor_command('cur_step', cursor_id, {})
+    def cur_step(self, cursor_id, **kw):
+        _, status = self._cursor_command('cur_step', cursor_id, {}, **kw)
         return status == 200
 
-    def cur_step_back(self, cursor_id):
-        resp, status = self._cursor_command('cur_step_back', cursor_id, {})
+    def cur_step_back(self, cursor_id, **kw):
+        _, status = self._cursor_command('cur_step_back', cursor_id, {}, **kw)
         return status == 200
 
     def cur_set_value(self, cursor_id, value, step=False, expire_time=None,
-                      encode_value=True):
+                      encode_value=True, **kw):
         if encode_value:
             value = self.encode_value(value)
         data = {'value': value}
@@ -1172,36 +1175,32 @@ class KyotoTycoon(object):
             data['xt'] = str(expire_time)
         if step:
             data['step'] = ''
-        resp, status = self._cursor_command('cur_set_value', cursor_id, data)
+        _, s = self._cursor_command('cur_set_value', cursor_id, data, **kw)
+        return s == 200
+
+    def cur_remove(self, cursor_id, **kw):
+        _, status = self._cursor_command('cur_remove', cursor_id, {}, **kw)
         return status == 200
 
-    def cur_remove(self, cursor_id):
-        resp, status = self._cursor_command('cur_remove', cursor_id, {})
-        return status == 200
-
-    def cur_get_key(self, cursor_id, step=False):
+    def cur_get_key(self, cursor_id, step=False, **kw):
         data = {'step': ''} if step else {}
-        resp, status = self._cursor_command('cur_get_key', cursor_id, data)
+        r, status = self._cursor_command('cur_get_key', cursor_id, data, **kw)
         if status == 450:
             return
-        key = resp[b'key']
-        if self.decode_keys:
-            key = decode(key)
-        return key
+        key = r[b'key']
+        return decode(key) if self.decode_keys else key
 
-    def cur_get_value(self, cursor_id, step=False, decode_value=True):
+    def cur_get_value(self, cursor_id, step=False, decode_value=True, **kw):
         data = {'step': ''} if step else {}
-        resp, status = self._cursor_command('cur_get_value', cursor_id, data)
-        if status == 450:
+        r, s = self._cursor_command('cur_get_value', cursor_id, data, **kw)
+        if s == 450:
             return
-        value = resp[b'value']
-        if decode_value:
-            value = self.decode_value(value)
-        return value
+        value = r[b'value']
+        return self.decode_value(value) if decode_value else value
 
-    def cur_get(self, cursor_id, step=False, decode_value=True):
+    def cur_get(self, cursor_id, step=False, decode_value=True, **kw):
         data = {'step': ''} if step else {}
-        resp, status = self._cursor_command('cur_get', cursor_id, data)
+        resp, status = self._cursor_command('cur_get', cursor_id, data, **kw)
         if status == 450:
             return
         key = resp[b'key']
@@ -1212,8 +1211,8 @@ class KyotoTycoon(object):
             value = self.decode_value(value)
         return (key, value)
 
-    def cur_seize(self, cursor_id, step=False, decode_value=True):
-        resp, status = self._cursor_command('cur_seize', cursor_id, {})
+    def cur_seize(self, cursor_id, step=False, decode_value=True, **kw):
+        resp, status = self._cursor_command('cur_seize', cursor_id, {}, **kw)
         if status == 450:
             return
         key = resp[b'key']
@@ -1224,8 +1223,8 @@ class KyotoTycoon(object):
             value = self.decode_value(value)
         return (key, value)
 
-    def cur_delete(self, cursor_id):
-        resp, status = self._cursor_command('cur_delete', cursor_id, {})
+    def cur_delete(self, cursor_id, **kw):
+        resp, status = self._cursor_command('cur_delete', cursor_id, {}, **kw)
         return status == 200
 
     def cursor(self, cursor_id=None, db=None, decode_values=True,
@@ -1259,14 +1258,14 @@ class KyotoTycoon(object):
         resp, status = self._request('/ulog_remove', data, None)
         return status == 200
 
-    def count(self, db=None):
+    def count(self, db=None, **kw):
         """
         Return the number of keys in the given database.
 
         :param int db: database index.
         :return: number of keys.
         """
-        resp = self.status(db)
+        resp = self.status(db, **kw)
         return int(resp.get('count') or 0)
 
     def size(self, db=None):
@@ -1356,54 +1355,56 @@ class Cursor(object):
     def is_valid(self):
         return self._valid
 
-    def jump(self, key=None):
-        self._valid = self.protocol.cur_jump(self.cursor_id, key, self.db)
+    def jump(self, key=None, **kw):
+        self._valid = self.protocol.cur_jump(self.cursor_id, key, self.db,
+                                             **kw)
         return self._valid
 
-    def jump_back(self, key=None):
-        self._valid = self.protocol.cur_jump_back(self.cursor_id, key, self.db)
+    def jump_back(self, key=None, **kw):
+        self._valid = self.protocol.cur_jump_back(self.cursor_id, key, self.db,
+                                                  **kw)
         return self._valid
 
-    def step(self):
-        self._valid = self.protocol.cur_step(self.cursor_id)
+    def step(self, **kw):
+        self._valid = self.protocol.cur_step(self.cursor_id, **kw)
         return self._valid
 
-    def step_back(self):
-        self._valid = self.protocol.cur_step_back(self.cursor_id)
+    def step_back(self, **kw):
+        self._valid = self.protocol.cur_step_back(self.cursor_id, **kw)
         return self._valid
 
-    def key(self, step=False):
+    def key(self, step=False, **kw):
         if self._valid:
-            return self.protocol.cur_get_key(self.cursor_id, step)
+            return self.protocol.cur_get_key(self.cursor_id, step, **kw)
 
-    def value(self, step=False):
+    def value(self, step=False, **kw):
         if self._valid:
             return self.protocol.cur_get_value(self.cursor_id, step,
-                                               self._decode_values)
+                                               self._decode_values, **kw)
 
-    def get(self, step=False):
+    def get(self, step=False, **kw):
         if self._valid:
             return self.protocol.cur_get(self.cursor_id, step,
-                                         self._decode_values)
+                                         self._decode_values, **kw)
 
-    def set_value(self, value, step=False, expire_time=None):
+    def set_value(self, value, step=False, expire_time=None, **kw):
         if self._valid:
             if not self.protocol.cur_set_value(self.cursor_id, value, step,
                                                expire_time,
-                                               self._encode_values):
+                                               self._encode_values, **kw):
                 self._valid = False
         return self._valid
 
-    def remove(self):
+    def remove(self, **kw):
         if self._valid:
-            if not self.protocol.cur_remove(self.cursor_id):
+            if not self.protocol.cur_remove(self.cursor_id, **kw):
                 self._valid = False
         return self._valid
 
-    def seize(self, step=False):
+    def seize(self, step=False, **kw):
         if self._valid:
             kv = self.protocol.cur_seize(self.cursor_id, step,
-                                         self._decode_values)
+                                         self._decode_values, **kw)
             if kv is None:
                 self._valid = False
             return kv
