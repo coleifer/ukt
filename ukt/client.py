@@ -37,12 +37,6 @@ if sys.version_info[0] > 2:
     unicode = str
 
 
-class KTError(Exception): pass
-class ProtocolError(KTError): pass
-class ServerConnectionError(KTError): pass
-class ServerError(KTError): pass
-
-
 SET_BULK = b'\xb8'
 GET_BULK = b'\xba'
 REMOVE_BULK = b'\xb9'
@@ -52,6 +46,10 @@ NO_REPLY = 0x01
 EXPIRE = 0x7fffffffffffffff
 
 
+from ukt.exceptions import KTError
+from ukt.exceptions import ProtocolError
+from ukt.exceptions import ServerConnectionError
+from ukt.exceptions import ServerError
 from ukt.serializer import decode
 from ukt.serializer import encode
 from ukt.serializer import _deserialize_dict
