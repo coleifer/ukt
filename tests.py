@@ -143,6 +143,19 @@ class KyotoTycoonTests(object):
         self.assertEqual(self.db.increment_double('nd'), 1.)
         self.assertEqual(self.db.increment_double('nd', 2.5), 3.5)
 
+    def test_http_crud(self):
+        self.assertTrue(self.db.set_http('k1', 'v1'))
+        resp = self.db.set_bulk_http({'k1': 'v1-x', 'k2': 'v2', 'k3': 'v3'})
+        self.assertEqual(resp, 3)
+
+        self.assertEqual(self.db.get_http('k1'), 'v1-x')
+        self.assertEqual(self.db.remove_http('k2'), 1)
+        self.assertEqual(self.db.remove_http('k2'), 0)
+
+        self.assertEqual(self.db.get_bulk_http(['k1', 'k2', 'k3']),
+                         {'k1': 'v1-x', 'k3': 'v3'})
+        self.assertEqual(self.db.remove_bulk_http(['k1', 'k2', 'k3']), 2)
+
     def test_noreply(self):
         self.assertTrue(self.db.set('k1', 'v1', no_reply=True) is None)
         self.assertEqual(self.db.get('k1'), 'v1')
