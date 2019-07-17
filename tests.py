@@ -851,8 +851,8 @@ class TestKyotoTycoonScripting(BaseTestCase):
         self.assertEqual(L.queue_clear(queue='tq'), {'num': '5'})
 
     def test_queue_helper(self):
-        qa = Queue(self.db, 'qa')
-        qb = Queue(self.db, 'qb')
+        qa = LuaQueue(self.db, 'qa')
+        qb = LuaQueue(self.db, 'qb')
 
         for i in range(20):
             qa.add('i%s' % i)
@@ -975,7 +975,7 @@ class TestKyotoTycoonScriptingSerialization(BaseTestCase):
         'server_args': ['-scr', lua_script]}
 
     def test_queue_pickle(self):
-        q = Queue(self.db, 'queue')
+        q = LuaQueue(self.db, 'queue')
         data = [{'item': 'i%s' % i} for i in range(3)]
         serialized = [pickle.dumps(item) for item in data]
         q.add(serialized[0])

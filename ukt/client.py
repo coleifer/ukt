@@ -50,6 +50,7 @@ from ukt.exceptions import KTError
 from ukt.exceptions import ProtocolError
 from ukt.exceptions import ServerConnectionError
 from ukt.exceptions import ServerError
+from ukt.exceptions import SignalTimeout
 from ukt.serializer import decode
 from ukt.serializer import encode
 from ukt.serializer import _deserialize_dict
@@ -749,7 +750,9 @@ class KyotoTycoon(object):
                 raise
 
         if status != 200:
-            if allowed_status is None or status not in allowed_status:
+            if status == 503 and signal is not None:
+                raise SignalTimeout('%s timed out waiting for signal' % path)
+            elif allowed_status is None or status not in allowed_status:
                 raise ProtocolError('protocol error [%s]' % status)
 
         data = self._decode_response(content, content_type, decode_keys)

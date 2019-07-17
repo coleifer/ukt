@@ -9,3 +9,6 @@ class ServerConnectionError(KTError): pass
 
 # Indicates an error/unexpected response from the server.
 class ServerError(KTError): pass
+
+# Indicate time-out waiting for signal.
+class SignalTimeout(KTError): pass
