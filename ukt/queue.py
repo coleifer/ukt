@@ -112,7 +112,7 @@ class SignalQueue(object):
                 ok = self.client.cur_jump(self.cursor_id, self.key, self.db,
                                           signal=self.signal, wait=wait)
             except SignalTimeout:
-                continue
+                return
 
         resp = self.client.cur_seize(self.cursor_id)
         if resp is not None:
