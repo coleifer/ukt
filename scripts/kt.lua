@@ -1232,6 +1232,75 @@ function _hx_key_to_table(tbl, key, idx, store_s, store_p, store_o)
 end
 
 
+-- I use a custom build of Kyoto Tycoon that includes some additional lua
+-- libraries as built-ins, including the msgpack serializer from Redis.
+if cmsgpack ~= nil then
+  -- Assuming a key contains a msgpack-serialized table, this function takes
+  -- the key/value pairs in the serialized table and unpacks them into their
+  -- own msgpack-serialized keys.
+  -- accepts { key }
+  -- returns { num }
+  function unpack_packed_key(inmap, outmap)
+    local key = inmap.key
+    if not key then
+      kt.log('system', 'unpack_packed_key() missing required "key"')
+      return kt.RVEINVALID
+    else
+      inmap.key = nil
+    end
+    local db = _select_db(inmap)
+    local value, xt = db:get(key)
+    local n = 0
+    if value ~= nil then
+      -- Unpack the msgpack-serialized data into separate keys/values.
+      local unpacked = cmsgpack.unpack(value)
+      for k, v in pairs(unpacked) do
+        if not db:set(k, cmsgpack.pack(v), xt) then
+          kt.log('system', 'error setting key in unpack_packed_key()')
+          return kt.RVEINTERNAL
+        end
+        n = n + 1
+      end
+    end
+    outmap.num = n
+    return kt.RVSUCCESS
+  end
+
+  -- Takes any number of msgpack-serialized keys and packs them into a single
+  -- msgpack-serialized key.
+  -- accepts { key, k1, ... kn }
+  -- returns { num }
+  function pack_unpacked_keys(inmap, outmap)
+    local key = inmap.key
+    if not key then
+      kt.log("system", "pack_unpacked_keys() missing required 'key'")
+      return kt.RVEINVALID
+    else
+      inmap.key = nil
+    end
+    local db = _select_db(inmap)
+
+    local accum = {}
+    local n = 0
+    local v, xt
+    for k, _ in pairs(inmap) do
+      v, xt = db:get(k)
+      if v ~= nil then
+        accum[k] = cmsgpack.unpack(v)
+        n = n + 1
+      end
+    end
+
+    if not db:set(key, cmsgpack.pack(accum)) then
+      kt.log('system', 'error setting packed key!')
+      return kt.RVEINTERNAL
+    end
+    outmap.num = n
+    return kt.RVSUCCESS
+  end
+end
+
+
 -- get luajit version.
 function jit_version(inmap, outmap)
   outmap.version = "v" .. jit.version
