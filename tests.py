@@ -1384,5 +1384,31 @@ class TestArrayMapSerialization(unittest.TestCase):
         self.assertEqual(deserialize(b''), [])
 
 
+class TestConnectionError(unittest.TestCase):
+    def setUp(self):
+        if sys.version_info[0] > 2:
+            warnings.filterwarnings(action='ignore', message='unclosed',
+                                    category=ResourceWarning)
+
+        self.server = EmbeddedServer(database=':')
+        self.server.run()
+        self.db = self.server.client
+
+    def tearDown(self):
+        self.server.stop()
+        self.db.close_all()
+
+    def test_connection_error(self):
+        self.assertEqual(self.db.set('k1', 'v1'), 1)
+        self.assertEqual(self.db.get('k1'), 'v1')
+
+        # Restart the server.
+        self.server.stop()
+        self.server.run()
+
+        self.assertRaises(ServerConnectionError, self.db.get, 'k1')
+        self.assertTrue(self.db.get('k1') is None)
+
+
 if __name__ == '__main__':
     unittest.main(argv=sys.argv)

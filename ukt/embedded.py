@@ -134,6 +134,7 @@ class EmbeddedServer(object):
                     funcs.append((fn, arg, kw))
             atexit._exithandlers = funcs
         self._stop_server()
+        return True
 
     def _find_open_port(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

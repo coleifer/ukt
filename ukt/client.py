@@ -50,6 +50,7 @@ from ukt.exceptions import KTError
 from ukt.exceptions import ProtocolError
 from ukt.exceptions import ServerConnectionError
 from ukt.exceptions import ServerError
+from ukt.exceptions import ServerTimeoutError
 from ukt.exceptions import SignalTimeout
 from ukt.serializer import decode
 from ukt.serializer import encode
@@ -103,8 +104,10 @@ class Socket(object):
                     continue
                 break
         except socket.timeout:
-            raise ServerConnectionError('timed out reading from socket')
+            self.close()
+            raise ServerTimeoutError('timed out reading from socket')
         except socket.error:
+            self.close()
             raise ServerConnectionError('error reading from socket')
 
     def recv(self, length):
@@ -123,9 +126,17 @@ class Socket(object):
     def send(self, data):
         try:
             self.sock.sendall(data)
-        except IOError:
+        except socket.timeout:
             self.close()
-            raise ServerConnectionError('server went away')
+            raise ServerTimeoutError('timed out writing to socket')
+        except socket.error as exc:
+            self.close()
+            if len(exc.args) == 1:
+                errno, errmsg = 'unknown', exc.args[0]
+            else:
+                errno, errmsg = exc.args[:2]
+            raise ServerConnectionError('error %s writing to socket. %s' %
+                                        (errno, errmsg))
 
     def purge(self):
         self.buf.seek(0)
@@ -346,8 +357,6 @@ class KyotoTycoon(object):
         sock = self.pool.checkout(http)
         try:
             yield sock
-        except socket.error:
-            sock.close()
         finally:
             self.pool.checkin(sock, http)
 
