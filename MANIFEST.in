@@ -3,4 +3,5 @@ include README.md
 include tests.py
 include scripts/kt.lua
 include ukt/serializer.c
+include ukt/serializer.pyx
 recursive-include docs *
