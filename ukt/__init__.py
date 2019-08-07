@@ -1,4 +1,4 @@
-__version__ = '0.1.1'
+__version__ = '0.1.2'
 
 from ukt.client import KT_BINARY
 from ukt.client import KT_JSON
