@@ -1223,7 +1223,7 @@ class KyotoTycoon(object):
             value = self.decode_value(value)
         return (key, value)
 
-    def cur_seize(self, cursor_id, step=False, decode_value=True, **kw):
+    def cur_seize(self, cursor_id, decode_value=True, **kw):
         resp, status = self._cursor_command('cur_seize', cursor_id, {}, **kw)
         if status == 450:
             return
@@ -1416,10 +1416,10 @@ class Cursor(object):
                 self._valid = False
         return self._valid
 
-    def seize(self, step=False, **kw):
+    def seize(self, **kw):
         if self._valid:
-            kv = self.protocol.cur_seize(self.cursor_id, step,
-                                         self._decode_values, **kw)
+            kv = self.protocol.cur_seize(self.cursor_id, self._decode_values,
+                                         **kw)
             if kv is None:
                 self._valid = False
             return kv

@@ -441,7 +441,7 @@ class TestKyotoTycoonCursor(BaseTestCase):
         self.assertEqual(c.value(True), 'v1')
         self.assertTrue(c.set_value('v2-x', True))
         self.assertEqual(c.get(step=True), ('k3', 'v3'))
-        self.assertEqual(c.seize(True), ('k4', 'v4'))
+        self.assertEqual(c.seize(), ('k4', 'v4'))
         self.assertTrue(c.is_valid())
         self.assertTrue(c.key(True) is None)
         self.assertFalse(c.set_value('xx'))
@@ -450,6 +450,21 @@ class TestKyotoTycoonCursor(BaseTestCase):
         c.jump_back()
         self.assertEqual(list(c), [('k3', 'v3'), ('k2', 'v2-x'), ('k1', 'v1')])
         self.assertTrue(c.get(step=True) is None)
+
+    def test_seize_remove_step(self):
+        # Unclear about the STEP parameter for seize operation.
+        c = self.db.cursor()
+        c.jump()
+        self.assertEqual(c.seize(), ('k1', 'v1'))
+        self.assertEqual(c.seize(), ('k2', 'v2'))
+        self.assertEqual(c.get(True), ('k3', 'v3'))
+        self.assertTrue(c.remove())  # Remove k4.
+
+        self.db.set('k1', 'v1-a')
+        self.db.set('k2', 'v2-b')
+        c.jump()
+        self.assertTrue(c.remove())
+        self.assertEqual(list(c), [('k2', 'v2-b'), ('k3', 'v3')])
 
 
 class TestKyotoTycoonSerializers(BaseTestCase):
