@@ -137,6 +137,9 @@ class Socket(object):
                 errno, errmsg = exc.args[:2]
             raise ServerConnectionError('error %s writing to socket. %s' %
                                         (errno, errmsg))
+        except Exception as exc:
+            self.close()
+            raise exc
 
     def purge(self):
         self.buf.seek(0)
