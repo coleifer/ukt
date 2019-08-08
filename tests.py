@@ -395,7 +395,7 @@ class TestKyotoTycoonCursor(BaseTestCase):
         self.assertEqual(cursor.get(), ('k4', 'v4'))
 
         self.assertEqual(list(cursor), [('k4', 'v4')])
-        self.assertEqual(list(cursor), [('k4', 'v4')])
+        self.assertEqual(list(cursor), [])
         self.assertTrue(cursor.jump_back())
         self.assertTrue(cursor.remove())
         self.assertEqual(list(cursor), [])
@@ -411,6 +411,45 @@ class TestKyotoTycoonCursor(BaseTestCase):
 
         # Nonlazy.
         self.assertEqual(self.db.keys_nonlazy(), ['k1', 'k2', 'k3', 'k4'])
+
+    def test_cursor_iteration(self):
+        c = self.db.cursor()
+        c.jump('k2')
+        self.assertEqual(list(c), [('k2', 'v2'), ('k3', 'v3'), ('k4', 'v4')])
+
+        # Mark for backwards iteration.
+        self.assertTrue(c.jump_back('k2x'))
+        self.assertEqual(list(c), [('k2', 'v2'), ('k1', 'v1')])
+
+        # Mark for forwards iteration.
+        self.assertTrue(c.jump('k2x'))
+        self.assertEqual(list(c), [('k3', 'v3'), ('k4', 'v4')])
+
+        # Jumping to invalid records will cause us to iterate the full set.
+        self.assertFalse(c.jump('kx'))
+        self.assertEqual(list(c), [])
+        self.assertFalse(c.jump_back('k0'))
+        self.assertEqual(list(c), [])
+
+        # However we can jump back and iterate again.
+        self.assertTrue(c.jump('k3'))
+        self.assertEqual(list(c), [('k3', 'v3'), ('k4', 'v4')])
+
+    def test_read_write_step(self):
+        c = self.db.cursor()
+        self.assertTrue(c.jump('k0x'))  # Positioned at k1.
+        self.assertEqual(c.value(True), 'v1')
+        self.assertTrue(c.set_value('v2-x', True))
+        self.assertEqual(c.get(step=True), ('k3', 'v3'))
+        self.assertEqual(c.seize(True), ('k4', 'v4'))
+        self.assertTrue(c.is_valid())
+        self.assertTrue(c.key(True) is None)
+        self.assertFalse(c.set_value('xx'))
+        self.assertFalse(c.remove())
+
+        c.jump_back()
+        self.assertEqual(list(c), [('k3', 'v3'), ('k2', 'v2-x'), ('k1', 'v1')])
+        self.assertTrue(c.get(step=True) is None)
 
 
 class TestKyotoTycoonSerializers(BaseTestCase):

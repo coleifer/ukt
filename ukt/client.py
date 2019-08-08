@@ -1357,10 +1357,11 @@ class Cursor(object):
         self.db = db
         self._decode_values = decode_values
         self._encode_values = encode_values
+        self._initialized = False
         self._valid = False
 
     def __iter__(self):
-        if not self._valid:
+        if not self._initialized and not self._valid:
             self.jump()
         return self
 
@@ -1368,11 +1369,13 @@ class Cursor(object):
         return self._valid
 
     def jump(self, key=None, **kw):
+        self._initialized = True
         self._valid = self.protocol.cur_jump(self.cursor_id, key, self.db,
                                              **kw)
         return self._valid
 
     def jump_back(self, key=None, **kw):
+        self._initialized = True
         self._valid = self.protocol.cur_jump_back(self.cursor_id, key, self.db,
                                                   **kw)
         return self._valid
@@ -1430,11 +1433,9 @@ class Cursor(object):
     def __next__(self):
         if not self._valid:
             raise StopIteration
-        kv = self.protocol.cur_get(self.cursor_id)
+        kv = self.protocol.cur_get(self.cursor_id, step=True)
         if kv is None:
             self._valid = False
             raise StopIteration
-        elif not self.step():
-            self._valid = False
         return kv
     next = __next__
