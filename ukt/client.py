@@ -172,9 +172,9 @@ class Pool(object):
 
         # We keep two sets of sockets around - one for the binary protocol, and
         # another for the HTTP protocol.
-        self.in_use = set()
+        self.in_use = {}
         self.free = []
-        self.in_use_http = set()
+        self.in_use_http = {}
         self.free_http = []
 
     @property
@@ -209,24 +209,24 @@ class Pool(object):
         while free_list:
             ts, sock = heapq.heappop(free_list)
             if ts > threshold:
-                in_use.add(sock)
+                in_use[sock] = ts
                 return sock
             else:
                 sock.close()
 
         sock = constructor()
-        in_use.add(sock)
+        in_use[sock] = time.time()
         return sock
 
     def checkin(self, sock, http=False):
         if http:
-            self.in_use_http.remove(sock)
+            ts = self.in_use_http.pop(sock)
             if sock.sock is not None:
-                heapq.heappush(self.free_http, (time.time(), sock))
+                heapq.heappush(self.free_http, (ts, sock))
         else:
-            self.in_use.remove(sock)
+            ts = self.in_use.pop(sock)
             if not sock.is_closed:
-                heapq.heappush(self.free, (time.time(), sock))
+                heapq.heappush(self.free, (ts, sock))
 
     def disconnect(self):
         n = 0
@@ -242,8 +242,8 @@ class Pool(object):
 
         self.free = []
         self.free_http = []
-        self.in_use = set()
-        self.in_use_http = set()
+        self.in_use = {}
+        self.in_use_http = {}
 
         return n
 
