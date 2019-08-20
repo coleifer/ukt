@@ -1160,6 +1160,28 @@ class KyotoTycoon(object):
             data['max'] = str(max_keys)
         return self._do_bulk_sorted_command('/match_similar', data, db, **kw)
 
+    def touch(self, key, xt=None, db=None):
+        """
+        Run a lua function (touch) defined in scripts/kt.lua that allows one
+        to update the TTL / expire time of a key.
+
+        If the key does not exist, then the old expire time is returned as -1.
+
+        :param str key: key to update.
+        :param int xt: new expire time (or None).
+        :param int db: database index.
+        :return: a 2-tuple of (changed?, old expire time).
+        """
+        data = {'key': key}
+        if xt: data['xt'] = xt
+        if db: data['db'] = db
+        out = self.script('touch', data=data, encode_values=False,
+                          decode_values=False)
+        xt = out['xt']
+        if xt is not None:
+            xt = int(decode(xt))
+        return (out['changed'] == b'1'), xt
+
     def _cursor_command(self, cmd, cursor_id, data, db=None, **kw):
         data['CUR'] = cursor_id
         resp, status = self._request('/%s' % cmd, data, db, (450, 501),

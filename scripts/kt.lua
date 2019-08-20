@@ -1301,6 +1301,62 @@ if cmsgpack ~= nil then
 end
 
 
+-- Update or change the expire time for a key.
+-- accepts { key, xt }
+-- returns { xt: old xt, changed: 1 or 0 }
+function touch(inmap, outmap)
+  local key = inmap.key
+  if not key then
+    kt.log('system', 'touch() missing required "key"')
+    return kt.RVEINVALID
+  else
+    inmap.key = nil
+  end
+  local db = _select_db(inmap)
+  local value, old_xt = db:get(key)
+
+  -- If the key does not exist, there's nothing to do. We'll return -1 for the
+  -- old expire time to indicate this.
+  if not value then
+    outmap.changed = 0
+    outmap.xt = -1
+    return kt.RVSUCCESS
+  end
+
+  -- Ensure that the new expire time is a numeric value.
+  local xt = inmap.xt
+  if xt then
+    xt = tonumber(xt)
+  else
+    xt = -0xffffffffff
+  end
+
+  -- Because absolute expire times are specified as negative values, we will
+  -- compare the old timestamp w/the absolute value of the new timestamp. If
+  -- the timestamp is *not* negative, then we will add its value to the current
+  -- time.
+  local actual_xt
+  if xt < 0 then
+    actual_xt = -xt
+  else
+    actual_xt = math.floor(kt.time()) + xt
+  end
+
+  -- Update the expire timestamp if it has changed.
+  if actual_xt ~= old_xt then
+    if not db:set(key, value, xt) then
+      kt.log('system', 'touch(): error setting expire-time for key!')
+      return kt.RVEINTERNAL
+    end
+    outmap.changed = 1
+  else
+    outmap.changed = 0
+  end
+  outmap.xt = old_xt
+  return kt.RVSUCCESS
+end
+
+
 -- get luajit version.
 function jit_version(inmap, outmap)
   outmap.version = "v" .. jit.version

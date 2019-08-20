@@ -15,6 +15,7 @@ except ImportError:
     msgpack = None
 
 from ukt import *
+from ukt.client import EXPIRE
 
 
 class BaseTestCase(unittest.TestCase):
@@ -544,6 +545,81 @@ class TestKyotoTycoonScripting(BaseTestCase):
     server_kwargs = {
         'database': '%',
         'server_args': ['-scr', lua_script]}
+
+    def test_script_touch(self):
+        now = int(time.time())
+
+        # Negative expire times are treated as epoch time.
+        xt1 = now + 100
+        xt2 = now + 200
+        xt_none = 0xffffffffff
+        self.db.set('k1', 'v1', expire_time=-xt1)
+        self.db.set('k2', 'v2', expire_time=-xt2)
+        self.db.set('k3', 'v3')
+
+        def assertXT(keys, expected):
+            res = self.db.get_bulk_details([(0, k) for k in keys])
+            xts = {k: (v, xt) for _, k, v, xt in res}
+            self.assertEqual(xts, expected)
+
+        assertXT(['k1', 'k2', 'k3'], {
+            'k1': ('v1', xt1),
+            'k2': ('v2', xt2),
+            'k3': ('v3', xt_none)})
+
+        # Update the timestamp and verify the return value.
+        xt1_1 = now + 300
+        res = self.db.touch('k1', -xt1_1)
+        self.assertEqual(res, (True, xt1))
+        assertXT(['k1'], {'k1': ('v1', xt1_1)})
+
+        # Test that leaving the timestamp unchanged also works as expected.
+        res = self.db.touch('k2', -xt2)
+        self.assertEqual(res, (False, xt2))
+        assertXT(['k1', 'k2', 'k3'], {
+            'k1': ('v1', xt1_1),
+            'k2': ('v2', xt2),
+            'k3': ('v3', xt_none)})
+
+        # Test relative timestamps.
+        xt1_2 = int(time.time()) + 60
+        changed, _ = self.db.touch('k1', 60)
+        self.assertTrue(changed)
+
+        # Leave the relative timestamp unchanged.
+        changed, old_xt = self.db.touch('k1', 60)
+        if changed:
+            self.assertTrue(abs(old_xt - xt1_2) < 5)
+            xt1_2 = old_xt
+
+        # And again, using the absolute timestamp.
+        changed, _ = self.db.touch('k1', -xt1_2)
+        self.assertFalse(changed)
+
+        # Test using non-existent key.
+        changed, old_xt = self.db.touch('kx')
+        self.assertFalse(changed)
+        self.assertEqual(old_xt, -1)
+
+        # Test clearing the timestamp.
+        changed, old_xt = self.db.touch('k1')
+        self.assertTrue(changed)
+        assertXT(['k1'], {'k1': ('v1', xt_none)})
+
+        # Verify that clearing it again results in no change.
+        changed, _ = self.db.touch('k1')
+        self.assertFalse(changed)
+
+        # And check that we can set a cleared key.
+        changed, old_xt = self.db.touch('k3', -xt1)
+        self.assertTrue(changed)
+        self.assertEqual(old_xt, xt_none)
+
+        # Verify final state.
+        assertXT(['k1', 'k2', 'k3'], {
+            'k1': ('v1', xt_none),
+            'k2': ('v2', xt2),
+            'k3': ('v3', xt1)})
 
     def test_script_set(self):
         L = self.db.lua
