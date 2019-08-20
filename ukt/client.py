@@ -539,12 +539,14 @@ class KyotoTycoon(object):
             buf.write(struct_i.pack(NO_REPLY if no_reply else 0))
             buf.write(struct_i.pack(len(data)))
 
-            for db, key, value, xt in data.items():
+            for db, key, value, xt in data:
                 bkey = encode(key)
                 if encode_values:
                     bval = self.encode_value(value)
                 else:
                     bval = encode(value)
+                if xt is None:
+                    xt = EXPIRE
                 buf.write(struct_dbkvxt.pack(db, len(bkey), len(bval), xt))
                 buf.write(bkey)
                 buf.write(bval)
@@ -1181,6 +1183,26 @@ class KyotoTycoon(object):
         if xt is not None:
             xt = int(decode(xt))
         return (out['changed'] == b'1'), xt
+
+    def touch_bulk(self, keys, xt=None, db=None):
+        """
+        Run a lua function (touch_bulk) defined in scripts/kt.lua that allows
+        one to update the TTL / expire time of multiple keys.
+
+        The return value is a dictionary of key -> old expire time. If the key
+        does not exist, then the key is omitted from the return value.
+
+        :param list keys: keys to update.
+        :param int xt: new expire time (or None).
+        :param int db: database index.
+        :return: a dict of key -> old expire time.
+        """
+        data = {'db': db} if db is not None else {}
+        for key in keys:
+            data[key] = str(xt or EXPIRE)
+        out = self.script('touch_bulk', data=data, encode_values=False,
+                          decode_values=False)
+        return {key: int(decode(value)) for key, value in out.items()}
 
     def _cursor_command(self, cmd, cursor_id, data, db=None, **kw):
         data['CUR'] = cursor_id

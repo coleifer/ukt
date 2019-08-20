@@ -621,6 +621,43 @@ class TestKyotoTycoonScripting(BaseTestCase):
             'k2': ('v2', xt2),
             'k3': ('v3', xt1)})
 
+    def test_script_mtouch(self):
+        def assertXT(keys, expected):
+            res = self.db.get_bulk_details([(0, k) for k in keys])
+            xts = {k: (v, xt) for _, k, v, xt in res}
+            self.assertEqual(xts, expected)
+
+        now = int(time.time())
+
+        # Negative expire times are treated as epoch time.
+        xt1 = now + 100
+        xt2 = now + 200
+        xt_none = 0xffffffffff
+        self.db.set_bulk_details([
+            (0, 'k1', 'v1', -xt1),
+            (0, 'k2', 'v2', -xt2),
+            (0, 'k3', 'v3', 60),
+            (0, 'k4', 'v4', None)])
+
+        xt1_1 = now + 300
+        res = self.db.touch_bulk(['k1', 'k3', 'kx'], -xt1_1)
+        self.assertEqual(res, {'k1': xt1, 'k3': now + 60})
+
+        assertXT(['k1', 'k2', 'k3', 'k4'], {
+            'k1': ('v1', xt1_1),
+            'k2': ('v2', xt2),
+            'k3': ('v3', xt1_1),
+            'k4': ('v4', xt_none)})
+
+        res = self.db.touch_bulk(['k2', 'k4'])
+        self.assertEqual(res, {'k2': xt2, 'k4': xt_none})
+
+        assertXT(['k1', 'k2', 'k3', 'k4'], {
+            'k1': ('v1', xt1_1),
+            'k2': ('v2', xt_none),
+            'k3': ('v3', xt1_1),
+            'k4': ('v4', xt_none)})
+
     def test_script_set(self):
         L = self.db.lua
 
