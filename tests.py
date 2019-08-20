@@ -540,11 +540,16 @@ class TestKyotoTycoonSerializers(BaseTestCase):
         self.assertEqual(db.get('k3'), [u'foo', b'bar'])
 
 
-class TestKyotoTycoonScripting(BaseTestCase):
+class TestLuaXT(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server_kwargs = {
         'database': '%',
         'server_args': ['-scr', lua_script]}
+
+    def assertXT(self, keys, expected):
+        res = self.db.get_bulk_details([(0, k) for k in keys])
+        xts = {k: (v, xt) for _, k, v, xt in res}
+        self.assertEqual(xts, expected)
 
     def test_script_touch(self):
         now = int(time.time())
@@ -557,12 +562,7 @@ class TestKyotoTycoonScripting(BaseTestCase):
         self.db.set('k2', 'v2', expire_time=-xt2)
         self.db.set('k3', 'v3')
 
-        def assertXT(keys, expected):
-            res = self.db.get_bulk_details([(0, k) for k in keys])
-            xts = {k: (v, xt) for _, k, v, xt in res}
-            self.assertEqual(xts, expected)
-
-        assertXT(['k1', 'k2', 'k3'], {
+        self.assertXT(['k1', 'k2', 'k3'], {
             'k1': ('v1', xt1),
             'k2': ('v2', xt2),
             'k3': ('v3', xt_none)})
@@ -571,12 +571,12 @@ class TestKyotoTycoonScripting(BaseTestCase):
         xt1_1 = now + 300
         res = self.db.touch('k1', -xt1_1)
         self.assertEqual(res, xt1)
-        assertXT(['k1'], {'k1': ('v1', xt1_1)})
+        self.assertXT(['k1'], {'k1': ('v1', xt1_1)})
 
         # Test that leaving the timestamp unchanged also works as expected.
         res = self.db.touch('k2', -xt2)
         self.assertEqual(res, xt2)
-        assertXT(['k1', 'k2', 'k3'], {
+        self.assertXT(['k1', 'k2', 'k3'], {
             'k1': ('v1', xt1_1),
             'k2': ('v2', xt2),
             'k3': ('v3', xt_none)})
@@ -598,7 +598,7 @@ class TestKyotoTycoonScripting(BaseTestCase):
 
         # Test clearing the timestamp.
         self.db.touch('k1')
-        assertXT(['k1'], {'k1': ('v1', xt_none)})
+        self.assertXT(['k1'], {'k1': ('v1', xt_none)})
 
         # Verify that clearing it again results in no change.
         old_xt = self.db.touch('k1')
@@ -609,17 +609,12 @@ class TestKyotoTycoonScripting(BaseTestCase):
         self.assertEqual(old_xt, xt_none)
 
         # Verify final state.
-        assertXT(['k1', 'k2', 'k3'], {
+        self.assertXT(['k1', 'k2', 'k3'], {
             'k1': ('v1', xt_none),
             'k2': ('v2', xt2),
             'k3': ('v3', xt1)})
 
-    def test_script_mtouch(self):
-        def assertXT(keys, expected):
-            res = self.db.get_bulk_details([(0, k) for k in keys])
-            xts = {k: (v, xt) for _, k, v, xt in res}
-            self.assertEqual(xts, expected)
-
+    def test_script_touch_bulk(self):
         now = int(time.time())
 
         # Negative expire times are treated as epoch time.
@@ -636,7 +631,7 @@ class TestKyotoTycoonScripting(BaseTestCase):
         res = self.db.touch_bulk(['k1', 'k3', 'kx'], -xt1_1)
         self.assertEqual(res, {'k1': xt1, 'k3': now + 60})
 
-        assertXT(['k1', 'k2', 'k3', 'k4'], {
+        self.assertXT(['k1', 'k2', 'k3', 'k4'], {
             'k1': ('v1', xt1_1),
             'k2': ('v2', xt2),
             'k3': ('v3', xt1_1),
@@ -645,13 +640,72 @@ class TestKyotoTycoonScripting(BaseTestCase):
         res = self.db.touch_bulk(['k2', 'k4'])
         self.assertEqual(res, {'k2': xt2, 'k4': xt_none})
 
-        assertXT(['k1', 'k2', 'k3', 'k4'], {
+        self.assertXT(['k1', 'k2', 'k3', 'k4'], {
             'k1': ('v1', xt1_1),
             'k2': ('v2', xt_none),
             'k3': ('v3', xt1_1),
             'k4': ('v4', xt_none)})
 
         self.assertEqual(self.db.touch_bulk([]), {})
+
+    def test_script_touch_relative(self):
+        now = int(time.time())
+
+        # Negative expire times are treated as epoch time.
+        xt1 = now + 100
+        xt2 = now + 200
+        xt_none = 0xffffffffff
+        self.db.set_bulk_details([
+            (0, 'k1', 'v1', -xt1),
+            (0, 'k2', 'v2', -xt2),
+            (0, 'k3', 'v3', 60),
+            (0, 'k4', 'v4', None)])
+
+        # First verify that the TTL for k3 is roughly 60s from now.
+        xt3 = now + 60
+        ttl = self.db.expire_time('k3')
+        self.assertTrue(abs(xt3 - ttl) < 2)
+
+        out = self.db.touch_bulk_relative(['k1', 'k3'], 300)
+        self.assertEqual(out, {
+            'k1': xt1 + 300,
+            'k3': ttl + 300})
+
+        self.assertXT(['k1', 'k2', 'k3', 'k4'], {
+            'k1': ('v1', xt1 + 300),
+            'k2': ('v2', xt2),
+            'k3': ('v3', ttl + 300),
+            'k4': ('v4', xt_none)})
+
+        # Reports the XT of k4 to be 0xffffffffff + 10, but really the max
+        # value is kt_none, so it retains that value when re-reading.
+        out = self.db.touch_bulk_relative(['k2', 'k4', 'kx'], 10)
+        self.assertEqual(out, {
+            'k2': xt2 + 10,
+            'k4': xt_none + 10})
+
+        self.assertXT(['k1', 'k2', 'k3', 'k4'], {
+            'k1': ('v1', xt1 + 300),
+            'k2': ('v2', xt2 + 10),
+            'k3': ('v3', ttl + 300),
+            'k4': ('v4', xt_none)})
+
+        self.assertEqual(self.db.expire_time('k1'), xt1 + 300)
+        self.assertEqual(self.db.expire_time('k2'), xt2 + 10)
+        self.assertEqual(self.db.expire_time('k4'), xt_none)
+        self.assertEqual(self.db.expire_time('kx'), None)
+
+        # Verify we can use touch_relative() and also set negative intervals.
+        out = self.db.touch_relative('k1', -100)
+        self.assertEqual(out, xt1 + 200)
+        self.assertEqual(self.db.expire_time('k1'), xt1 + 200)
+
+
+class TestKyotoTycoonScripting(BaseTestCase):
+    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
+    server_kwargs = {
+        'database': '%',
+        'server_args': ['-scr', lua_script]}
 
     def test_script_set(self):
         L = self.db.lua

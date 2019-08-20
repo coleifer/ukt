@@ -1333,6 +1333,57 @@ function touch_bulk(inmap, outmap)
 end
 
 
+-- Increase the expire time for multiple keys.
+-- accepts { key1: n1, key2: n2, ... }
+-- returns { key1: xt1, key2: xt2, ... }
+function touch_bulk_relative(inmap, outmap)
+  local db = _select_db(inmap)
+  local keys = {}
+  for key, _ in pairs(inmap) do
+    table.insert(keys, key)
+  end
+
+  -- If there's nothing to do, return early.
+  if #keys == 0 then
+    return kt.RVSUCCESS
+  end
+
+  -- Visit each key specified by the user and increase the expire time.
+  local function visitor(key, value, xt)
+    if not value then
+      return kt.Visitor.NOP
+    end
+    local new_xt = xt + tonumber(inmap[key])
+    outmap[key] = new_xt
+    return value, -new_xt
+  end
+
+  if not db:accept_bulk(keys, visitor) then
+    kt.log('system', 'touch_bulk_relative(): error calling accept_bulk()')
+    return kt.RVEINTERNAL
+  end
+  return kt.RVSUCCESS
+end
+
+
+-- Read the expire time for a key.
+-- accepts { key: key to read }
+-- returns { xt: expire time }
+function expire_time(inmap, outmap)
+  local key = inmap.key
+  if not key then
+    kt.log("system", "expire_time() missing required 'key'")
+    return kt.RVEINVALID
+  end
+  local db = _select_db(inmap)
+  local value, xt = db:get(key)
+  if xt then
+    outmap['xt'] = xt
+  end
+  return kt.RVSUCCESS
+end
+
+
 -- get luajit version.
 function jit_version(inmap, outmap)
   outmap.version = "v" .. jit.version

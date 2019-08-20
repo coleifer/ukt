@@ -1191,12 +1191,63 @@ class KyotoTycoon(object):
         :param int db: database index.
         :return: a dict of key -> old expire time.
         """
-        data = {'db': db} if db is not None else {}
+        data = {'db': self.default_db if db is None else db}
         for key in keys:
             data[key] = str(xt or EXPIRE)
         out = self.script('touch_bulk', data=data, encode_values=False,
                           decode_values=False)
         return {key: int(decode(value)) for key, value in out.items()}
+
+    def touch_relative(self, key, n, db=None):
+        """
+        Run a lua function (touch_bulk_relative) defined in scripts/kt.lua that
+        allows one to increment the TTL / expire time of a key.
+
+        The new expire time is returned. If the key does not exist, then None
+        is returned.
+
+        :param str key: key to update.
+        :param int n: seconds to increase expire-time.
+        :param int db: database index.
+        :return: new expire time or None if key not found.
+        """
+        ret = self.touch_bulk_relative([key], n, db)
+        return ret.get(decode(key) if self.decode_keys else encode(key))
+
+    def touch_bulk_relative(self, keys, n, db=None):
+        """
+        Run a lua function (touch_bulk_relative) defined in scripts/kt.lua that
+        allows one to update the TTL / expire time of multiple keys.
+
+        The return value is a dictionary of key -> new expire time. If the key
+        does not exist, then the key is omitted from the return value.
+
+        :param list keys: keys to update.
+        :param int n: seconds to increase expire-time.
+        :param int db: database index.
+        :return: a dict of key -> new expire time.
+        """
+        data = {'db': self.default_db if db is None else db}
+        for key in keys:
+            data[key] = str(n)
+        out = self.script('touch_bulk_relative', data=data,
+                          encode_values=False, decode_values=False)
+        return {key: int(decode(value)) for key, value in out.items()}
+
+    def expire_time(self, key, db=None):
+        """
+        Get the expire time by running a lua function (expire_time) defined in
+        scripts/kt.lua.
+
+        :param str key: key to check.
+        :param int db: database index
+        :return: expire timestamp or None if key not found.
+        """
+        data = {'db': self.default_db if db is None else db, 'key': key}
+        out = self.script('expire_time', data, encode_values=False,
+                          decode_values=False)
+        if out:
+            return int(out['xt'])
 
     def _cursor_command(self, cmd, cursor_id, data, db=None, **kw):
         data['CUR'] = cursor_id
