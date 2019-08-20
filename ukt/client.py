@@ -219,13 +219,18 @@ class Pool(object):
         return sock
 
     def checkin(self, sock, http=False):
+        threshold = time.time() - self.max_age
         if http:
             ts = self.in_use_http.pop(sock)
-            if sock.sock is not None:
+            if ts < threshold:
+                sock.close()
+            elif sock.sock is not None:
                 heapq.heappush(self.free_http, (ts, sock))
         else:
             ts = self.in_use.pop(sock)
-            if not sock.is_closed:
+            if ts < threshold:
+                sock.close()
+            elif not sock.is_closed:
                 heapq.heappush(self.free, (ts, sock))
 
     def disconnect(self):

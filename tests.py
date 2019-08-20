@@ -1371,6 +1371,53 @@ class TestConnectionPool(BaseTestCase):
         p.checkin(s)
         self.assertEqual(p.stats, (0, 1, 0, 0))
 
+    def test_pool_age_tracking(self):
+        self.db.close_all()  # Ensure no open connections.
+
+        p = self.db.pool
+        self.assertEqual(p.stats, (0, 0, 0, 0))
+        s1 = p.create_socket()
+        s2 = p.create_socket()
+
+        # Configure with two sockets, one expires in 200s, one in 600s.
+        now = time.time()
+        s1_time = now - 3400
+        s2_time = now - 3000
+        p.free = [(s1_time, s1), (s2_time, s2)]
+
+        # Checking out a socket gives us the oldest one first.
+        s = p.checkout()
+        self.assertTrue(s is s1)
+
+        # Pool indicates that we have one in use and one available.
+        self.assertEqual(p.stats, (1, 1, 0, 0))
+        p.checkin(s)
+        self.assertEqual(p.stats, (0, 2, 0, 0))
+
+        # Pool retains the timestamp for the socket creation.
+        self.assertEqual(p.free, [(s1_time, s1), (s2_time, s2)])
+
+        # We get s1 again, as it is still the oldest.
+        s = p.checkout()
+        self.assertTrue(s is s1)
+
+        # Make socket ready for closing.
+        p.in_use[s] = now - 3601
+        self.assertFalse(s.is_closed)
+        p.checkin(s)
+
+        # The socket was closed and is not recycled.
+        self.assertTrue(s.is_closed)
+        self.assertEqual(p.stats, (0, 1, 0, 0))
+
+        # Manually close the socket and verify it is not recycled.
+        s = p.checkout()
+        self.assertTrue(s is s2)
+        s.close()
+        p.checkin(s)
+
+        self.assertEqual(p.stats, (0, 0, 0, 0))
+
 
 class TestArrayMapSerialization(unittest.TestCase):
     def setUp(self):
