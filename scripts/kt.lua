@@ -1309,50 +1309,49 @@ function touch(inmap, outmap)
   if not key then
     kt.log('system', 'touch() missing required "key"')
     return kt.RVEINVALID
-  else
-    inmap.key = nil
   end
+
   local db = _select_db(inmap)
-  local value, old_xt = db:get(key)
-
-  -- If the key does not exist, there's nothing to do. We'll return -1 for the
-  -- old expire time to indicate this.
-  if not value then
-    outmap.changed = 0
-    outmap.xt = -1
-    return kt.RVSUCCESS
-  end
-
-  -- Ensure that the new expire time is a numeric value.
-  local xt = inmap.xt
-  if xt then
-    xt = tonumber(xt)
+  local new_xt = inmap.xt
+  if new_xt then
+    new_xt = tonumber(new_xt)
   else
-    xt = -0xffffffffff
+    new_xt = -0xffffffffff
   end
 
-  -- Because absolute expire times are specified as negative values, we will
-  -- compare the old timestamp w/the absolute value of the new timestamp. If
-  -- the timestamp is *not* negative, then we will add its value to the current
-  -- time.
-  local actual_xt
-  if xt < 0 then
-    actual_xt = -xt
-  else
-    actual_xt = math.floor(kt.time()) + xt
+  local function visit(key, value, xt)
+    if not value then
+      return kt.Visitor.NOP
+    end
+    outmap.xt = xt
+
+    -- Because absolute expire times are specified as negative values, we have
+    -- to switch the sign of the new timestamp if it is negative. If the
+    -- timestamp is *not* negative, then we will add its value to the current
+    -- time.
+    local actual_xt
+    if new_xt < 0 then
+      actual_xt = -new_xt
+    else
+      actual_xt = math.floor(kt.time()) + new_xt
+    end
+
+    if actual_xt ~= xt then
+      outmap.changed = 1
+      return value, new_xt
+    end
+
+    return kt.Visitor.NOP
   end
+
+  outmap.changed = 0
+  outmap.xt = -1
 
   -- Update the expire timestamp if it has changed.
-  if actual_xt ~= old_xt then
-    if not db:set(key, value, xt) then
-      kt.log('system', 'touch(): error setting expire-time for key!')
-      return kt.RVEINTERNAL
-    end
-    outmap.changed = 1
-  else
-    outmap.changed = 0
+  if not db:accept(key, visit) then
+    kt.log('system', 'touch(): error updating expire-time for key!')
+    return kt.RVEINTERNAL
   end
-  outmap.xt = old_xt
   return kt.RVSUCCESS
 end
 
