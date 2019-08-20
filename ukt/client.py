@@ -1167,22 +1167,16 @@ class KyotoTycoon(object):
         Run a lua function (touch) defined in scripts/kt.lua that allows one
         to update the TTL / expire time of a key.
 
-        If the key does not exist, then the old expire time is returned as -1.
+        The old expire time is returned. If the key does not exist, then None
+        is returned.
 
         :param str key: key to update.
         :param int xt: new expire time (or None).
         :param int db: database index.
-        :return: a 2-tuple of (changed?, old expire time).
+        :return: old expire time or None if key not found.
         """
-        data = {'key': key}
-        if xt: data['xt'] = xt
-        if db: data['db'] = db
-        out = self.script('touch', data=data, encode_values=False,
-                          decode_values=False)
-        xt = out['xt']
-        if xt is not None:
-            xt = int(decode(xt))
-        return (out['changed'] == b'1'), xt
+        ret = self.touch_bulk([key], xt, db)
+        return ret.get(decode(key) if self.decode_keys else encode(key))
 
     def touch_bulk(self, keys, xt=None, db=None):
         """

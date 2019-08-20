@@ -570,12 +570,12 @@ class TestKyotoTycoonScripting(BaseTestCase):
         # Update the timestamp and verify the return value.
         xt1_1 = now + 300
         res = self.db.touch('k1', -xt1_1)
-        self.assertEqual(res, (True, xt1))
+        self.assertEqual(res, xt1)
         assertXT(['k1'], {'k1': ('v1', xt1_1)})
 
         # Test that leaving the timestamp unchanged also works as expected.
         res = self.db.touch('k2', -xt2)
-        self.assertEqual(res, (False, xt2))
+        self.assertEqual(res, xt2)
         assertXT(['k1', 'k2', 'k3'], {
             'k1': ('v1', xt1_1),
             'k2': ('v2', xt2),
@@ -583,36 +583,29 @@ class TestKyotoTycoonScripting(BaseTestCase):
 
         # Test relative timestamps.
         xt1_2 = int(time.time()) + 60
-        changed, _ = self.db.touch('k1', 60)
-        self.assertTrue(changed)
+        self.db.touch('k1', 60)
 
         # Leave the relative timestamp unchanged.
-        changed, old_xt = self.db.touch('k1', 60)
-        if changed:
-            self.assertTrue(abs(old_xt - xt1_2) < 5)
-            xt1_2 = old_xt
+        old_xt = self.db.touch('k1', 60)
+        self.assertTrue(abs(old_xt - xt1_2) < 2)
 
         # And again, using the absolute timestamp.
-        changed, _ = self.db.touch('k1', -xt1_2)
-        self.assertFalse(changed)
+        self.db.touch('k1', -xt1_2)
 
         # Test using non-existent key.
-        changed, old_xt = self.db.touch('kx')
-        self.assertFalse(changed)
-        self.assertEqual(old_xt, -1)
+        old_xt = self.db.touch('kx')
+        self.assertTrue(old_xt is None)
 
         # Test clearing the timestamp.
-        changed, old_xt = self.db.touch('k1')
-        self.assertTrue(changed)
+        self.db.touch('k1')
         assertXT(['k1'], {'k1': ('v1', xt_none)})
 
         # Verify that clearing it again results in no change.
-        changed, _ = self.db.touch('k1')
-        self.assertFalse(changed)
+        old_xt = self.db.touch('k1')
+        self.assertEqual(old_xt, xt_none)
 
         # And check that we can set a cleared key.
-        changed, old_xt = self.db.touch('k3', -xt1)
-        self.assertTrue(changed)
+        old_xt = self.db.touch('k3', -xt1)
         self.assertEqual(old_xt, xt_none)
 
         # Verify final state.
