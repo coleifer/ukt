@@ -658,6 +658,8 @@ class TestKyotoTycoonScripting(BaseTestCase):
             'k3': ('v3', xt1_1),
             'k4': ('v4', xt_none)})
 
+        self.assertEqual(self.db.touch_bulk([]), {})
+
     def test_script_set(self):
         L = self.db.lua
 
