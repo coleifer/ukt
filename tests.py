@@ -540,12 +540,14 @@ class TestKyotoTycoonSerializers(BaseTestCase):
         self.assertEqual(db.get('k3'), [u'foo', b'bar'])
 
 
-class TestLuaXT(BaseTestCase):
+class BaseLuaTestCase(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server_kwargs = {
         'database': '%',
         'server_args': ['-scr', lua_script]}
 
+
+class TestLuaExpireTime(BaseLuaTestCase):
     def assertXT(self, keys, expected):
         res = self.db.get_bulk_details([(0, k) for k in keys])
         xts = {k: (v, xt) for _, k, v, xt in res}
@@ -701,12 +703,7 @@ class TestLuaXT(BaseTestCase):
         self.assertEqual(self.db.expire_time('k1'), xt1 + 200)
 
 
-class TestLuaErrorCode(BaseTestCase):
-    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
-    server_kwargs = {
-        'database': '%',
-        'server_args': ['-scr', lua_script]}
-
+class TestLuaErrorCode(BaseLuaTestCase):
     def test_error_codes(self):
         def trigger(flag):
             return self.db.script('_error_code', {'flag': str(flag)})
@@ -742,12 +739,7 @@ class TestLuaErrorCode(BaseTestCase):
         self.assertEqual(resp_msg, 'success')
 
 
-class TestKyotoTycoonScripting(BaseTestCase):
-    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
-    server_kwargs = {
-        'database': '%',
-        'server_args': ['-scr', lua_script]}
-
+class TestKyotoTycoonScripting(BaseLuaTestCase):
     def test_script_set(self):
         L = self.db.lua
 
