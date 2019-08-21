@@ -744,13 +744,13 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         L = self.db.lua
 
         # Test adding a single item.
-        self.assertEqual(L.sadd(key='s1', foo=''), {'num': '1'})
-        self.assertEqual(L.sadd(key='s1', foo=''), {'num': '0'})
+        self.assertEqual(L.sadd(key='s1', x='foo'), {'num': '1'})
+        self.assertEqual(L.sadd(key='s1', x='foo'), {'num': '0'})
 
         # Test adding multiple items.
         items = ['bar', 'baz', 'nug']
-        self.assertEqual(L.sadd(key='s1', **{k: '' for k in items}),
-                         {'num': '3'})
+        ret = L.sadd(key='s1', **{str(i): k for i, k in enumerate(items)})
+        self.assertEqual(ret, {'num': '3'})
 
         # Test get cardinality.
         self.assertEqual(L.scard(key='s1'), {'num': '4'})
@@ -781,12 +781,12 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         self.assertEqual(res, {'num': '0'})
 
         # Restore all keys.
-        L.sadd(key='s1', **{k: '' for k in keys})
+        L.sadd(key='s1', **{str(i): k for i, k in enumerate(keys)})
         self.assertEqual(L.srem(key='s1', value='nug'), {'num': '1'})
         self.assertEqual(L.srem(key='s1', value='nug'), {'num': '0'})
 
         # Create another set, s2 {baze, foo, zai}.
-        L.sadd(key='s2', **{k: '' for k in ['baze', 'foo', 'zai']})
+        L.sadd(key='s2', a='baze', b='foo', c='zai')
 
         # Test multiple set operations, {bar, baz, foo} | {baze, foo, zai}.
         res = L.sinter(key1='s1', key2='s2').values()
@@ -1259,7 +1259,7 @@ class TestKyotoTycoonScriptingMultiDB(BaseTestCase):
 
         # Test sets with multiple dbs.
         for i in range(5):
-            kwargs = {'v%s' % i: '', 'db': i % 2}
+            kwargs = {str(i): 'v%s' % i, 'db': i % 2}
             L.sadd(key='s1', **kwargs)
 
         self.assertEqual(L.scard(key='s1', db=0), {'num': '3'})

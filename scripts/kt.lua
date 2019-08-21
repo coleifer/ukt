@@ -243,12 +243,12 @@ end
 
 
 -- Redis-like SADD functionality for adding value/score to set.
--- accepts: { key, value1, value... }
+-- accepts: { key, _: value1, _: value2... }
 -- returns: { num }
 function sadd(inmap, outmap)
   local fn = function(k, v, i, o)
     local n = 0
-    for value, _ in pairs(i) do
+    for _, value in pairs(i) do
       if v[value] == nil then
         v[value] = ""
         n = n + 1
