@@ -748,7 +748,7 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         self.assertEqual(L.sadd(key='s1', foo=''), {'num': '0'})
 
         # Test adding multiple items.
-        items = [b'bar', b'baz', b'nug']
+        items = ['bar', 'baz', 'nug']
         self.assertEqual(L.sadd(key='s1', **{k: '' for k in items}),
                          {'num': '3'})
 
@@ -786,7 +786,7 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         self.assertEqual(L.srem(key='s1', value='nug'), {'num': '0'})
 
         # Create another set, s2 {baze, foo, zai}.
-        L.sadd(key='s2', **{k: '' for k in [b'baze', b'foo', b'zai']})
+        L.sadd(key='s2', **{k: '' for k in ['baze', 'foo', 'zai']})
 
         # Test multiple set operations, {bar, baz, foo} | {baze, foo, zai}.
         res = L.sinter(key1='s1', key2='s2').values()
