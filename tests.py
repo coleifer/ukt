@@ -744,12 +744,13 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         L = self.db.lua
 
         # Test adding a single item.
-        self.assertEqual(L.sadd(key='s1', value='foo'), {'num': '1'})
-        self.assertEqual(L.sadd(key='s1', value='foo'), {'num': '0'})
+        self.assertEqual(L.sadd(key='s1', foo=''), {'num': '1'})
+        self.assertEqual(L.sadd(key='s1', foo=''), {'num': '0'})
 
         # Test adding multiple items.
-        items = b'\x01'.join([b'bar', b'baz', b'nug'])
-        self.assertEqual(L.sadd(key='s1', value=items), {'num': '3'})
+        items = [b'bar', b'baz', b'nug']
+        self.assertEqual(L.sadd(key='s1', **{k: '' for k in items}),
+                         {'num': '3'})
 
         # Test get cardinality.
         self.assertEqual(L.scard(key='s1'), {'num': '4'})
@@ -761,7 +762,7 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         keys = ['bar', 'baz', 'foo', 'nug']
 
         # Test get members.
-        self.assertEqual(L.smembers(key='s1'), dict((k, '1') for k in keys))
+        self.assertEqual(sorted(L.smembers(key='s1').values()), sorted(keys))
         self.assertEqual(L.scard(key='s1'), {'num': '4'})
 
         # Test pop.
@@ -780,28 +781,28 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         self.assertEqual(res, {'num': '0'})
 
         # Restore all keys.
-        L.sadd(key='s1', value=b'\x01'.join(k.encode() for k in keys))
+        L.sadd(key='s1', **{k: '' for k in keys})
         self.assertEqual(L.srem(key='s1', value='nug'), {'num': '1'})
         self.assertEqual(L.srem(key='s1', value='nug'), {'num': '0'})
 
         # Create another set, s2 {baze, foo, zai}.
-        L.sadd(key='s2', value=b'\x01'.join([b'baze', b'foo', b'zai']))
+        L.sadd(key='s2', **{k: '' for k in [b'baze', b'foo', b'zai']})
 
         # Test multiple set operations, {bar, baz, foo} | {baze, foo, zai}.
-        self.assertEqual(L.sinter(key1='s1', key2='s2'), {'foo': '1'})
-        res = L.sunion(key1='s1', key2='s2')
-        self.assertEqual(res, dict((k, '1') for k in
-                                   ('bar', 'baz', 'baze', 'foo', 'zai')))
+        res = L.sinter(key1='s1', key2='s2').values()
+        self.assertEqual(sorted(res), ['foo'])
+        res = L.sunion(key1='s1', key2='s2').values()
+        self.assertEqual(sorted(res), ['bar', 'baz', 'baze', 'foo', 'zai'])
 
-        res = L.sdiff(key1='s1', key2='s2')
-        self.assertEqual(res, {'bar': '1', 'baz': '1'})
-        res = L.sdiff(key1='s2', key2='s1')
-        self.assertEqual(res, {'baze': '1', 'zai': '1'})
+        res = L.sdiff(key1='s1', key2='s2').values()
+        self.assertEqual(sorted(res), ['bar', 'baz'])
+        res = L.sdiff(key1='s2', key2='s1').values()
+        self.assertEqual(sorted(res), ['baze', 'zai'])
 
-        res = L.sdiff(key1='s1', key2='s2', dest='s3')
-        self.assertEqual(res, {'bar': '1', 'baz': '1'})
-        res = L.smembers(key='s3')
-        self.assertEqual(res, {'bar': '1', 'baz': '1'})
+        res = L.sdiff(key1='s1', key2='s2', dest='s3').values()
+        self.assertEqual(sorted(res), ['bar', 'baz'])
+        res = L.smembers(key='s3').values()
+        self.assertEqual(sorted(res), ['bar', 'baz'])
 
     def test_script_list(self):
         L = self.db.lua
@@ -1258,16 +1259,19 @@ class TestKyotoTycoonScriptingMultiDB(BaseTestCase):
 
         # Test sets with multiple dbs.
         for i in range(5):
-            L.sadd(key='s1', value='v%s' % i, db=(i % 2))
+            kwargs = {'v%s' % i: '', 'db': i % 2}
+            L.sadd(key='s1', **kwargs)
 
         self.assertEqual(L.scard(key='s1', db=0), {'num': '3'})
         self.assertEqual(L.scard(key='s1', db=1), {'num': '2'})
 
         # By default the database is 0.
-        self.assertEqual(sorted(L.smembers(key='s1')), ['v0', 'v2', 'v4'])
-        self.assertEqual(sorted(L.smembers(key='s1', db=0)),
+        self.assertEqual(sorted(L.smembers(key='s1').values()),
                          ['v0', 'v2', 'v4'])
-        self.assertEqual(sorted(L.smembers(key='s1', db=1)), ['v1', 'v3'])
+        self.assertEqual(sorted(L.smembers(key='s1', db=0).values()),
+                         ['v0', 'v2', 'v4'])
+        self.assertEqual(sorted(L.smembers(key='s1', db=1).values()),
+                         ['v1', 'v3'])
 
         self.assertEqual(L.sismember(key='s1', value='v2', db=0), {'num': '1'})
         self.assertEqual(L.sismember(key='s1', value='v2', db=1), {'num': '0'})

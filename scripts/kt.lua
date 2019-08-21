@@ -243,19 +243,14 @@ end
 
 
 -- Redis-like SADD functionality for adding value/score to set.
--- accepts: { key, value } where multiple values are delimited by '\x01'
+-- accepts: { key, value1, value... }
 -- returns: { num }
 function sadd(inmap, outmap)
   local fn = function(k, v, i, o)
-    local value = i.value
-    if not value then
-      return nil, false
-    end
     local n = 0
-    local values = kt.split(value, "\1")
-    for i = 1, #values do
-      if v[values[i]] == nil then
-        v[values[i]] = ""
+    for value, _ in pairs(i) do
+      if v[value] == nil then
+        v[value] = ""
         n = n + 1
       end
     end
@@ -311,8 +306,10 @@ end
 -- returns: { v1, v2, ... }
 function smembers(inmap, outmap)
   local fn = function(k, v, i, o)
+    local idx = 0
     for key, value in pairs(v) do
-      o[key] = '1'
+      o[idx] = key
+      idx = idx + 1
     end
     return nil, true
   end
@@ -385,7 +382,11 @@ function svv(inmap, outmap, fn)
 
   local ret = fn(value_tbl1, value_tbl2, inmap, outmap)
   if ret == kt.RVSUCCESS and inmap.dest then
-    if not db:set(inmap.dest, kt.mapdump(outmap), xt) then
+    local dest_tbl = {}
+    for _, val in pairs(outmap) do
+      dest_tbl[val] = ''
+    end
+    if not db:set(inmap.dest, kt.mapdump(dest_tbl), xt) then
       return kt.RVEINTERNAL
     end
   end
@@ -398,9 +399,11 @@ end
 -- returns: { ... }
 function sinter(inmap, outmap)
   local fn = function(v1, v2, i, o)
+    local idx = 0
     for key, val in pairs(v1) do
       if v2[key] ~= nil then
-        o[key] = '1'
+        o[idx] = key
+        idx = idx + 1
       end
     end
     return kt.RVSUCCESS
@@ -414,11 +417,16 @@ end
 -- returns: { ... }
 function sunion(inmap, outmap)
   local fn = function(v1, v2, i, o)
+    local idx = 0
     for key, val in pairs(v1) do
-      o[key] = '1'
+      o[idx] = key
+      idx = idx + 1
     end
     for key, val in pairs(v2) do
-      o[key] = '1'
+      if v1[key] == nil then
+        o[idx] = key
+        idx = idx + 1
+      end
     end
     return kt.RVSUCCESS
   end
@@ -431,9 +439,11 @@ end
 -- returns: { ... }
 function sdiff(inmap, outmap)
   local fn = function(v1, v2, i, o)
+    local idx = 0
     for key, val in pairs(v1) do
       if v2[key] == nil then
-        o[key] = '1'
+        o[idx] = key
+        idx = idx + 1
       end
     end
     return kt.RVSUCCESS
