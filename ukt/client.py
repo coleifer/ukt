@@ -637,7 +637,7 @@ class KyotoTycoon(object):
         return self.remove_bulk((key,), db, no_reply)
 
     def script(self, name, data=None, no_reply=False, encode_values=True,
-               decode_values=True):
+               decode_values=True, _decode_keys=None):
         """
         Evaluate a lua script.
 
@@ -648,6 +648,9 @@ class KyotoTycoon(object):
         :param bool decode_values: deserialize values after reading result.
         :return: dictionary of key/value pairs returned by the lua function.
         """
+        decode_keys = (self.decode_keys if _decode_keys is None
+                       else _decode_keys)
+
         flags = NO_REPLY if no_reply else 0
         bname = encode(name)
         data = data or {}
@@ -681,13 +684,24 @@ class KyotoTycoon(object):
                 klen, vlen = struct_ii.unpack(sock.recv(8))
                 key = sock.recv(klen)
                 value = sock.recv(vlen)
-                if self.decode_keys:
+                if decode_keys:
                     key = decode(key)
                 if decode_values:
                     value = self.decode_value(value)
                 accum[key] = value
 
         return accum
+
+    def raw_script(self, name, data=None, no_reply=False):
+        """
+        Evaluate a lua script and return the result with no post-processing.
+
+        :param name: script function name.
+        :param dict data: dictionary of key/value pairs, passed as arguments.
+        :param bool no_reply: do not receive a response.
+        :return: dictionary of key/value pairs returned by the lua function.
+        """
+        return self.script(name, data, no_reply, False, False, False)
 
     # HTTP helpers.
 
@@ -1244,19 +1258,15 @@ class KyotoTycoon(object):
         :return: expire timestamp or None if key not found.
         """
         data = {'db': self.default_db if db is None else db, 'key': key}
-        out = self.script('expire_time', data, encode_values=False,
-                          decode_values=False)
+        out = self.raw_script('expire_time', data)
         if out:
-            return int(out['xt'])
+            return int(out[b'xt'])
 
     def error(self, db=None):
         data = {'db': self.default_db if db is None else db}
-        out = self.script('get_error', data, encode_values=False,
-                          decode_values=False)
+        out = self.raw_script('get_error', data)
         if out:
-            code_key = 'code' if self.decode_keys else b'code'
-            msg_key = 'message' if self.decode_keys else b'message'
-            return int(out[code_key]), decode(out[msg_key])
+            return int(out[b'code']), decode(out[b'message'])
 
     def _cursor_command(self, cmd, cursor_id, data, db=None, **kw):
         data['CUR'] = cursor_id
