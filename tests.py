@@ -701,6 +701,47 @@ class TestLuaXT(BaseTestCase):
         self.assertEqual(self.db.expire_time('k1'), xt1 + 200)
 
 
+class TestLuaErrorCode(BaseTestCase):
+    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
+    server_kwargs = {
+        'database': '%',
+        'server_args': ['-scr', lua_script]}
+
+    def test_error_codes(self):
+        def trigger(flag):
+            return self.db.script('_error_code', {'flag': str(flag)})
+
+        self.assertEqual(trigger(0), {})
+        expected = (
+            (1, 'noimpl'),
+            (2, 'invalid'),
+            (3, 'logic'),
+            (4, 'internal'),
+            (5, 'norepos'),
+            (6, 'noperm'),
+            (7, 'broken'),
+            (8, 'duprec'),
+            (9, 'norec'),
+            (10, 'system'),
+            (11, 'misc'))
+        for flag, msg in expected:
+            with self.assertRaises(ProtocolError):
+                trigger(flag)
+                code, resp_msg = self.db.error()
+                self.assertEqual(msg, resp_msg)
+
+        # After a successful operation, we get the success code.
+        self.db.set('kx', 'vx')
+        code, resp_msg = self.db.error()
+        self.assertEqual(resp_msg, 'success')
+
+        # Even though this fails, the error is not set to duprec? Just
+        # documenting this weird behavior.
+        self.assertFalse(self.db.add('kx', 'vx2'))
+        code, resp_msg = self.db.error()
+        self.assertEqual(resp_msg, 'success')
+
+
 class TestKyotoTycoonScripting(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server_kwargs = {

@@ -1384,6 +1384,55 @@ function expire_time(inmap, outmap)
 end
 
 
+-- Test error code handling.
+-- accepts { flag }
+-- returns error code specified by flag.
+function _error_code(inmap, outmap)
+  local flag = tonumber(inmap.flag or 0)
+  local error_map = {
+    [0] = kt.RVSUCCESS,
+    [1] = kt.RVENOIMPL,
+    [2] = kt.RVEINVALID,
+    [3] = kt.RVELOGIC,
+    [4] = kt.RVEINTERNAL,
+    [5] = kt.Error.NOREPOS,
+    [6] = kt.Error.NOPERM,
+    [7] = kt.Error.BROKEN,
+    [8] = kt.Error.DUPREC,
+    [9] = kt.Error.NOREC,
+    [10] = kt.Error.SYSTEM,
+    [11] = kt.Error.MISC}
+
+  return error_map[flag]
+end
+
+
+ERROR_MAP = {
+  [kt.Error.SUCCESS] = 'success',
+  [kt.Error.NOIMPL] = 'noimpl',
+  [kt.Error.INVALID] = 'invalid',
+  [kt.Error.NOREPOS] = 'norepos',
+  [kt.Error.NOPERM] = 'noperm',
+  [kt.Error.BROKEN] = 'broken',
+  [kt.Error.DUPREC] = 'duprec',
+  [kt.Error.NOREC] = 'norec',
+  [kt.Error.LOGIC] = 'logic',
+  [kt.Error.SYSTEM] = 'system',
+  [kt.Error.MISC] = 'misc'}
+
+
+function get_error(inmap, outmap)
+  local db = _select_db(inmap)
+  local err = db:error()
+  if err then
+    local code = err:code()
+    outmap['code'] = code
+    outmap['message'] = ERROR_MAP[code]
+  end
+  return kt.RVSUCCESS
+end
+
+
 -- get luajit version.
 function jit_version(inmap, outmap)
   outmap.version = "v" .. jit.version

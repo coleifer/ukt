@@ -1249,6 +1249,15 @@ class KyotoTycoon(object):
         if out:
             return int(out['xt'])
 
+    def error(self, db=None):
+        data = {'db': self.default_db if db is None else db}
+        out = self.script('get_error', data, encode_values=False,
+                          decode_values=False)
+        if out:
+            code_key = 'code' if self.decode_keys else b'code'
+            msg_key = 'message' if self.decode_keys else b'message'
+            return int(out[code_key]), decode(out[msg_key])
+
     def _cursor_command(self, cmd, cursor_id, data, db=None, **kw):
         data['CUR'] = cursor_id
         resp, status = self._request('/%s' % cmd, data, db, (450, 501),
