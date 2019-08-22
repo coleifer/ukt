@@ -1,4 +1,21 @@
 class Container(object):
+    """
+    Container-types that emulate Python containers.
+
+    These container types rely on Lua functions in scripts/kt.lua.
+
+    Behind-the-scenes these types rely on KT's internal mapload/mapdump and
+    arrayload/arraydump functionality. For reading and writing the binary
+    representation of the container types, you can use:
+
+    * :py:meth:`KyotoTycoon.serialize_dict` for mapdump
+    * :py:meth:`KyotoTycoon.deserialize_dict` for mapload
+    * :py:meth:`KyotoTycoon.serialize_list` for arraydump
+    * :py:meth:`KyotoTycoon.deserialize_list` for arrayload
+
+    Because the full data must be deserialized for reading, and serialized when
+    writing back any changes, all operations are O(n).
+    """
     key_field = None
 
     def __init__(self, kt, key, encode_values=True, decode_values=True):
@@ -31,6 +48,9 @@ class Container(object):
 
 
 class Hash(Container):
+    """
+    Container-type to emulate a Python dictionary stored in a single key.
+    """
     key_field = 'table_key'
 
     def set_bulk(self, __data=None, **kwargs):
@@ -95,6 +115,9 @@ class Hash(Container):
 
 
 class Set(Container):
+    """
+    Container-type to emulate a Python set stored in a single key.
+    """
     key_field = 'key'
 
     def add(self, *values):
@@ -138,6 +161,9 @@ class Set(Container):
 
 
 class List(Container):
+    """
+    Container-type to emulate a Python list stored in a single key.
+    """
     key_field = 'key'
 
     def appendleft(self, value):

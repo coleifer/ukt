@@ -418,6 +418,106 @@ Kyoto Tycoon client
         Property which exposes the size information returned by the
         :py:meth:`~KyotoTycoon.status` API.
 
+    .. py:method:: touch(key, xt=None, db=None)
+
+        :param str key: key to update.
+        :param int xt: new expire time (or None).
+        :param int db: database index.
+        :return: old expire time or None if key not found.
+
+        Run a lua function (touch) defined in scripts/kt.lua that allows one
+        to update the TTL / expire time of a key.
+
+        The old expire time is returned. If the key does not exist, then None
+        is returned.
+
+    .. py:method:: touch_bulk(keys, xt=None, db=None)
+
+        :param list keys: keys to update.
+        :param int xt: new expire time (or None).
+        :param int db: database index.
+        :return: a dict of key -> old expire time.
+
+        Run a lua function (touch_bulk) defined in scripts/kt.lua that allows
+        one to update the TTL / expire time of multiple keys.
+
+        The return value is a dictionary of key -> old expire time. If the key
+        does not exist, then the key is omitted from the return value.
+
+    .. py:method:: touch_relative(key, n, db=None)
+
+        :param str key: key to update.
+        :param int n: seconds to increase expire-time.
+        :param int db: database index.
+        :return: new expire time or None if key not found.
+
+        Run a lua function (touch_bulk_relative) defined in scripts/kt.lua that
+        allows one to increment the TTL / expire time of a key.
+
+        The new expire time is returned. If the key does not exist, then None
+        is returned.
+
+    .. py:method:: touch_bulk_relative(keys, n, db=None)
+
+        :param list keys: keys to update.
+        :param int n: seconds to increase expire-time.
+        :param int db: database index.
+        :return: a dict of key -> new expire time.
+
+        Run a lua function (touch_bulk_relative) defined in scripts/kt.lua that
+        allows one to update the TTL / expire time of multiple keys.
+
+        The return value is a dictionary of key -> new expire time. If the key
+        does not exist, then the key is omitted from the return value.
+
+    .. py:method:: expire_time(key, db=None)
+
+        :param str key: key to check.
+        :param int db: database index
+        :return: expire timestamp or None if key not found.
+
+        Get the expire time by running a lua function (expire_time) defined in
+        scripts/kt.lua.
+
+    .. py:method:: error(db=None)
+
+        :param int db: database index.
+        :return: a 2-tuple of (code, message)
+
+        Get the last error code and message.
+
+        If the last command was successful, then (0, 'success') is returned.
+
+    .. py:method:: Hash(key, encode_values=True, decode_values=True)
+
+        :param str key: key to store the hash table.
+        :param bool encode_values: serialize the hash values using the
+            configured serializer.
+        :param bool decode_values: de-serialize the hash values using the
+            configured serializer.
+
+        Create a :py:class:`Hash` container instance.
+
+    .. py:method:: List(key, encode_values=True, decode_values=True)
+
+        :param str key: key to store the list.
+        :param bool encode_values: serialize the list items using the
+            configured serializer.
+        :param bool decode_values: de-serialize the list items using the
+            configured serializer.
+
+        Create a :py:class:`List` container instance.
+
+    .. py:method:: Set(key, encode_values=True, decode_values=True)
+
+        :param str key: key to store the set.
+        :param bool encode_values: serialize the set keys using the
+            configured serializer.
+        :param bool decode_values: de-serialize the set keys using the
+            configured serializer.
+
+        Create a :py:class:`Set` container instance.
+
     .. py:method:: __getitem__(key_or_keydb)
 
         Item-lookup based on either ``key`` or a 2-tuple consisting of
