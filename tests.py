@@ -807,7 +807,7 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
     def test_script_list(self):
         L = self.db.lua
 
-        self.assertEqual(L.lrpush(key='l1', value='i0'), {})
+        self.assertEqual(L.lrpush(key='l1', value='i0'), {'length': '1'})
         # Test appending items to list.
         for i in range(1, 5):
             L.lrpush(key='l1', value='i%s' % i)
@@ -867,14 +867,14 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         self.assertEqual(R(stop=5), all_items)
 
         # Within bounds.
-        self.assertEqual(R(start=1, stop=4), {'1': 'i1', '2': 'i2', '3': 'i3'})
+        self.assertEqual(R(start=1, stop=4), {'0': 'i1', '1': 'i2', '2': 'i3'})
         self.assertEqual(R(start=0, stop=1), {'0': 'i0'})
-        self.assertEqual(R(start=3), {'3': 'i3', '4': 'i4'})
+        self.assertEqual(R(start=3), {'0': 'i3', '1': 'i4'})
         self.assertEqual(R(stop=-3), {'0': 'i0', '1': 'i1'})
-        self.assertEqual(R(start=1, stop=-3), {'1': 'i1'})
-        self.assertEqual(R(start=3, stop=-1), {'3': 'i3'})
-        self.assertEqual(R(start=-1), {'4': 'i4'})
-        self.assertEqual(R(start=-2), {'3': 'i3', '4': 'i4'})
+        self.assertEqual(R(start=1, stop=-3), {'0': 'i1'})
+        self.assertEqual(R(start=3, stop=-1), {'0': 'i3'})
+        self.assertEqual(R(start=-1), {'0': 'i4'})
+        self.assertEqual(R(start=-2), {'0': 'i3', '1': 'i4'})
 
         # Out-of-bounds or out-of-order.
         self.assertEqual(R(start=5), {})
