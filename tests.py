@@ -1534,6 +1534,22 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(l.pack('k2', 'k4', 0), 0)
         self.assertEqual(l.get_range(), ['foo', 'bar'])
 
+    def test_large_values(self):
+        n = 200
+        h = self.db.Hash('h')
+        data = {'k%064d' % i: 'v%01024d' % i for i in range(n)}
+        self.assertEqual(h.set_bulk(data), n)
+        self.assertEqual(h.get_all(), data)
+
+        values = sorted(data.values())
+        s = self.db.Set('s')
+        self.assertEqual(s.add_bulk(values), n)
+        self.assertEqual(s.members(), set(values))
+
+        l = self.db.List('l')
+        self.assertEqual(l.extend(values), n)
+        self.assertEqual(l.get_range(), values)
+
 
 class TestKyotoTycoonScriptingSerialization(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
