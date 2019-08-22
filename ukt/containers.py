@@ -26,6 +26,9 @@ class Container(object):
         return self.kt.script(func, accum, encode_values=False,
                               decode_values=decode_vals, _decode_keys=decode)
 
+    def clear(self):
+        self.kt.remove(self.key)
+
 
 class Hash(Container):
     key_field = 'table_key'
@@ -68,6 +71,19 @@ class Hash(Container):
 
     def contains(self, key):
         out = self.lua('hcontains', decode=False, raw_data={'key': key})
+        return int(out[b'num'])
+
+    def unpack(self, prefix=None):
+        data = {} if prefix is None else {'prefix': prefix}
+        out = self.lua('hunpack', decode=False, raw_data=data)
+        return int(out[b'num'])
+
+    def pack(self, start=None, stop=None, count=None):
+        data = {}
+        if start is not None: data['start'] = start
+        if stop is not None: data['stop'] = stop
+        if count is not None: data['count'] = str(count)
+        out = self.lua('hpack', decode=False, raw_data=data)
         return int(out[b'num'])
 
     __len__ = length
@@ -148,17 +164,22 @@ class List(Container):
 
     def index(self, index):
         out = self.lua('lindex', decode=True, raw_data={'index': index})
-        if out:
-            return out['value']
+        if not out:
+            raise IndexError('invalid index for list "%s"' % self.key)
+        return out['value']
 
     def insert(self, index, value):
         out = self.lua('linsert', {'value': value}, decode=False,
                        raw_data={'index': index})
+        if not out:
+            raise IndexError('invalid index for list "%s"' % self.key)
         return int(out[b'length'])
 
     def remove(self, index):
         out = self.lua('lrem', decode=True, raw_data={'index': str(index)})
-        return out.get('value')
+        if not out:
+            raise IndexError('invalid index for list "%s"' % self.key)
+        return out['value']
 
     def remove_range(self, start=None, stop=None):
         data = {}
@@ -178,15 +199,23 @@ class List(Container):
             return out['value']
 
     def pop(self, index=None):
-        return self.remove(index) if index is not None else self.popright()
+        if index is not None:
+            try:
+                return self.remove(index)
+            except IndexError:
+                pass
+        else:
+            return self.popright()
 
     def length(self):
         out = self.lua('llen', decode=False)
         return int(out[b'num'])
 
     def set(self, index, value):
-        self.lua('lset', {'value': value}, decode=True,
-                 raw_data={'index': index})
+        out = self.lua('lset', {'value': value}, decode=False,
+                       raw_data={'index': index})
+        if not out:
+            raise IndexError('invalid index for list set()')
 
     def find(self, value):
         out = self.lua('lfind', {'value': value}, decode=False)
@@ -197,6 +226,23 @@ class List(Container):
         out = self.lua('lrfind', {'value': value}, decode=False)
         idx = int(out[b'index'])
         return idx if idx >= 0 else None
+
+    def unpack(self, start=None, stop=None, prefix=None, fmt=None):
+        data = {}
+        if start is not None: data['start'] = str(start)
+        if stop is not None: data['stop'] = str(stop)
+        if prefix is not None: data['prefix'] = prefix
+        if fmt is not None: data['format'] = fmt
+        out = self.lua('lunpack', decode=False, raw_data=data)
+        return int(out[b'num'])
+
+    def pack(self, start=None, stop=None, count=None):
+        data = {}
+        if start is not None: data['start'] = start
+        if stop is not None: data['stop'] = stop
+        if count is not None: data['count'] = str(count)
+        out = self.lua('lpack', decode=False, raw_data=data)
+        return int(out[b'num'])
 
     def __getitem__(self, item):
         if isinstance(item, slice):

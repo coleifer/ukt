@@ -215,6 +215,70 @@ function hcontains(inmap, outmap)
 end
 
 
+-- HUNPACK - unpack the hash into separate top-level key/value pairs.
+-- accepts { table_key, prefix }
+-- returns { num }
+function hunpack(inmap, outmap)
+  local db_idx = inmap.db
+  local db = _select_db(inmap)
+  inmap.db = db_idx
+
+  local fn = function(k, v, i, o)
+    local prefix = i.prefix or (k .. ":")
+    local n = 0
+    local accum = {}
+    for key, value in pairs(v) do
+      accum[prefix .. key] = value
+      n = n + 1
+    end
+    if not db:set_bulk(accum) then
+      kt.log("system", "could not set bulk keys in hunpack()")
+      return kt.RVEINTERNAL
+    end
+    o.num = n
+    return nil, true
+  end
+  return hkv(inmap, outmap, fn)
+end
+
+
+-- HPACK - pack top-level key/value pairs into a hash.
+-- accepts { table_key, start, stop, count }
+-- returns { num }
+function hpack(inmap, outmap)
+  local db_idx = inmap.db
+  local db = _select_db(inmap)
+  inmap.db = db_idx
+
+  local fn = function(k, v, i, o)
+    local stop = i.stop
+    local count = 0xffffffff
+    if i.count then count = tonumber(i.count) end
+
+    local n = 0
+    local cur = db:cursor()
+    if i.start then
+      cur:jump(i.start)
+    else
+      cur:jump()
+    end
+
+    while count > n do
+      local key, value = cur:get(true)
+      if not key then break end
+      if stop and key >= stop then break end
+      v[key] = value
+      n = n + 1
+    end
+
+    cur:disable()
+    o.num = n
+    return (n > 0 and v or nil), true
+  end
+  return hkv(inmap, outmap, fn)
+end
+
+
 -- helper function for set functions.
 function skv(inmap, outmap, fn)
   local key = inmap.key
@@ -600,9 +664,19 @@ end
 function linsert(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
     local index, ok = _normalize_index(#arr, inmap.index)
+
+    -- Overrides to allow insertion at the head or tail of empty lists.
+    if not ok and inmap.index then
+      local i = tonumber(inmap.index)
+      if i == 0 or i == -1 then
+        index = 1
+        ok = true
+      end
+    end
+
     if not ok then
       kt.log("system", "invalid list index in linsert()")
-      return nil, false
+      return nil, true
     end
     if not inmap.value then
       kt.log("info", "missing value for linsert")
@@ -650,7 +724,7 @@ function lrem(inmap, outmap)
     local index, ok = _normalize_index(#arr, inmap.index)
     if not ok then
       kt.log("system", "invalid list index in lrem()")
-      return nil, false
+      return nil, true
     end
     outmap.value = arr[index]
     table.remove(arr, index)
@@ -711,7 +785,7 @@ end
 
 -- Redis-like LSET -- set item at index.
 -- accepts: { key, index, value }
--- returns: {}
+-- returns: { num }
 function lset(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
     local idx = tonumber(inmap.index or "0")
@@ -721,9 +795,10 @@ function lset(inmap, outmap)
     end
     if idx < 0 or idx >= #arr then
       kt.log("info", "invalid index for lset")
-      return nil, false
+      return nil, true
     end
     arr[idx + 1] = inmap.value
+    outmap['num'] = 1
     return arr, true
   end
   return lkv(inmap, outmap, fn)
@@ -767,6 +842,95 @@ function lrfind(inmap, outmap)
 end
 
 
+-- LUNPACK -- unpack the items of a list into their own keys.
+-- accepts { key, prefix, start, stop, format }
+-- returns { num }
+function lunpack(inmap, outmap)
+  local db_idx = inmap.db
+  local db = _select_db(inmap) -- Allow db to be specified as argument.
+  inmap.db = db_idx  -- Restore DB so it can be read by lkv.
+
+  local fn = function(key, arr, inmap, outmap)
+    local prefix = inmap.prefix or (key .. ":")
+    local format = inmap.format or "%04d"
+    local arrsize = #arr
+    local start = tonumber(inmap.start or "0") + 1
+
+    if start < 1 then
+      start = arrsize + start
+      if start < 1 then
+        return nil, true
+      end
+    end
+
+    local stop = inmap.stop
+    if stop then
+      stop = tonumber(stop)
+      if stop < 0 then
+        stop = arrsize + stop
+      end
+    else
+      stop = arrsize
+    end
+
+    local k
+    local n = 0
+    local accum = {}
+
+    for i = start, stop, 1 do
+      k = prefix .. string.format(format, n)
+      accum[k] = arr[i]
+      n = n + 1
+    end
+
+    if not db:set_bulk(accum) then
+      kt.log("system", "could not set bulk keys in lunpack()")
+      return kt.RVEINTERNAL
+    end
+    outmap.num = n
+    return nil, true
+  end
+  return lkv(inmap, outmap, fn)
+end
+
+
+-- LPACK -- pack a range of values into a list key.
+-- accepts { key, start, stop, count }
+-- returns { num }
+function lpack(inmap, outmap)
+  local db_idx = inmap.db
+  local db = _select_db(inmap) -- Allow db to be specified as argument.
+  inmap.db = db_idx  -- Restore DB so it can be read by lkv.
+
+  local fn = function(key, arr, inmap, outmap)
+    local stop = inmap.stop
+    local count = 0xffffffff
+    if inmap.count then count = tonumber(inmap.count) end
+
+    local n = 0
+    local cur = db:cursor()
+    if inmap.start then
+      cur:jump(inmap.start)
+    else
+      cur:jump()
+    end
+
+    while count > n do
+      local key, value = cur:get(true)
+      if not key then break end
+      if stop and key >= stop then break end
+      table.insert(arr, value)
+      n = n + 1
+    end
+
+    cur:disable()
+    outmap.num = n
+    return n > 0 and arr or nil, true
+  end
+  return lkv(inmap, outmap, fn)
+end
+
+
 -- Misc helpers.
 
 
@@ -802,7 +966,7 @@ function move(inmap, outmap)
   end
 
   if not db:accept_bulk(keys, visit) then
-    return kt.REINTERNAL
+    return kt.RVEINTERNAL
   end
 
   if not src_val then
@@ -1282,7 +1446,7 @@ function hx_add(inmap, outmap)
   local db, s, p, o = _select_db(inmap), inmap.s, inmap.p, inmap.o
   if not s or not p or not o then
     kt.log("info", "missing s/p/o parameter in hx_add call")
-    return kt.REVINVALID
+    return kt.RVEINVALID
   end
 
   local data = {}
@@ -1299,7 +1463,7 @@ function hx_remove(inmap, outmap)
   local db, s, p, o = _select_db(inmap), inmap.s, inmap.p, inmap.o
   if not s or not p or not o then
     kt.log("info", "missing s/p/o parameter in hx_remove call")
-    return kt.REVINVALID
+    return kt.RVEINVALID
   end
 
   db:remove_bulk(_hx_keys_for_values(s, p, o))
@@ -1312,7 +1476,7 @@ function hx_query(inmap, outmap)
   local db, s, p, o = _select_db(inmap), inmap.s, inmap.p, inmap.o
   if not s and not p and not o then
     kt.log("info", "missing s/p/o parameter in hx_query call")
-    return kt.REVINVALID
+    return kt.RVEINVALID
   end
 
   local start, stop = _hx_keys_for_query(s, p, o)

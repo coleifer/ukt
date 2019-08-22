@@ -826,7 +826,7 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         self.assertEqual(L.llen(key='l1'), {'num': '4'})
 
         # Verify setting indices.
-        self.assertEqual(L.lset(key='l1', index=2, value='i2-x'), {})
+        self.assertEqual(L.lset(key='l1', index=2, value='i2-x'), {'num': '1'})
         self.assertEqual(L.lindex(key='l1', index=2), {'value': 'i2-x'})
 
         self.assertEqual(L.lrpop(key='l1'), {'value': 'i3'})
@@ -1237,6 +1237,7 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(h.set_bulk({}), 0)
         self.assertEqual(h.get_bulk(['k1', 'k2', 'k3', 'kx']), data)
         self.assertEqual(h.get_bulk(['x1', 'x2']), {})
+        self.assertEqual(h.get_bulk([]), {})
 
         self.assertEqual(h['k2'], ['i0', 'i1', 'i2'])
         self.assertTrue(h['kx'] is None)
@@ -1248,6 +1249,7 @@ class TestLuaContainers(BaseLuaTestCase):
 
         self.assertEqual(h.remove_bulk(['k1', 'k3', 'kx']), 2)
         self.assertEqual(h.remove_bulk(['k1', 'k3', 'kx']), 0)
+        self.assertEqual(h.remove_bulk([]), 0)
         self.assertEqual(len(h), 2)
         self.assertEqual(h.get_all(),
                          {'k2': ['i0', 'i1', 'i2'], 'k4': ['foo', 'baz']})
@@ -1269,12 +1271,60 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertTrue(self.db.get_bytes('h1') is not None)
         self.assertEqual(self.db.count(), 1)
 
+    def test_hash_pack(self):
+        h = self.db.Hash('h1')
+        data = {'k%02d' % i: 'v%s' % i for i in range(10)}
+        self.db.set_bulk(data)
+        self.assertEqual(h.pack(), 10)
+        self.assertEqual(h.get_all(), data)
+        h.clear()
+
+        h = self.db.Hash('a1')
+        def reset():
+            h.clear()
+            h.set_bulk({'k01': 'v1-x', 'kx': 'vx'})
+        reset()
+
+        self.assertEqual(h.pack('k01', 'k03'), 2)
+        self.assertEqual(h.get_all(), {'k01': 'v1', 'k02': 'v2', 'kx': 'vx'})
+        reset()
+
+        # Look at behavior of partial keys.
+        self.assertEqual(h.pack('k03x', 'k05x'), 2)
+        self.assertEqual(h.get_all(), {'k01': 'v1-x', 'k04': 'v4',
+                                       'k05': 'v5', 'kx': 'vx'})
+        reset()
+
+        self.assertEqual(h.pack('k08'), 2)
+        self.assertEqual(h.get_all(), {'k01': 'v1-x', 'k08': 'v8',
+                                       'k09': 'v9', 'kx': 'vx'})
+        reset()
+
+        # Move hash to end of database.
+        old_key = h.key
+        hdata = self.db.get_bytes(old_key)
+        h.key = 'z1'
+        self.db.set(h.key, hdata, encode_value=False)
+        self.db.remove(old_key)
+
+        self.assertEqual(h.pack(stop='k02'), 2)
+        self.assertEqual(h.get_all(), {'k01': 'v1', 'k00': 'v0', 'kx': 'vx'})
+        reset()
+
+        self.assertEqual(h.pack(start='zz'), 0)
+        self.assertEqual(h.pack(start='zz', stop='zzz'), 0)
+        self.assertEqual(h.pack(start='a', stop='aa'), 0)
+        self.assertEqual(h.pack(stop='aa'), 0)
+        self.assertEqual(h.pack('k2', 'k4', 0), 0)
+        self.assertEqual(h.get_all(), {'k01': 'v1-x', 'kx': 'vx'})
+
     def test_set(self):
         s = self.db.Set('s1')
         self.assertEqual(s.add('k1'), 1)
         self.assertEqual(s.add('k1'), 0)
         self.assertEqual(s.add_bulk(['k2', 'k3', 'k4', 'k1']), 3)
         self.assertEqual(s.add_bulk(['k2', 'k3', 'k4', 'k1']), 0)
+        self.assertEqual(s.add_bulk([]), 0)
         self.assertEqual(len(s), 4)
         self.assertTrue('k1' in s)
         self.assertFalse('kx' in s)
@@ -1293,6 +1343,7 @@ class TestLuaContainers(BaseLuaTestCase):
 
         self.assertEqual(s.remove_bulk(('k1', 'k3', 'kx')), 2)
         self.assertEqual(s.remove_bulk(('k1', 'k3', 'kx')), 0)
+        self.assertEqual(s.remove_bulk([]), 0)
         self.assertEqual(s.members(), set(('k4',)))
 
         self.assertTrue(self.db.exists('s1'))
@@ -1308,6 +1359,12 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertTrue(s2.pop() in items)
         self.assertTrue(s2.pop() in items)
         self.assertEqual(len(s2), 3)
+
+        # Verify popping from an empty set.
+        s3 = self.db.Set('s3')
+        self.assertTrue(s3.pop() is None)
+        self.assertEqual(s3.remove('xx'), 0)
+        self.assertEqual(s3.members(), set())
 
     def test_list(self):
         l = self.db.List('l1')
@@ -1356,6 +1413,7 @@ class TestLuaContainers(BaseLuaTestCase):
         l = self.db.List('l1')
         # Set list to i0...i9.
         self.assertEqual(l.extend(['i2']), 1)
+        self.assertEqual(l.extend([]), 1)
         self.assertEqual(l.extend(['i3', 'i4', 'i5', 'i6', 'i7']), 6)
         self.assertEqual(l.insert(0, 'i1'), 7)
         self.assertEqual(l.appendleft('i0'), 8)
@@ -1376,9 +1434,105 @@ class TestLuaContainers(BaseLuaTestCase):
 
         self.assertEqual(l.remove_range(-3, 1), 2)
         self.assertEqual(l.get_range(), ['i1', 'i7'])
+        self.assertEqual(l.get_range(0, 5), ['i1', 'i7'])
+        self.assertEqual(l.get_range(2, 5), [])
 
         self.assertEqual(l.remove_range(), 0)
         self.assertEqual(l.get_range(), [])
+
+        # List is empty, we can still call remove_range() and request ranges.
+        self.assertEqual(l.remove_range(), 0)
+        self.assertEqual(l.get_range(), [])
+        self.assertEqual(l.get_range(3), [])
+        self.assertEqual(l.get_range(-2, -4), [])
+
+    def test_empty_list(self):
+        l = self.db.List('l1')
+        self.assertTrue(l.popleft() is None)
+        self.assertTrue(l.popright() is None)
+        self.assertTrue(l.pop(0) is None)
+        self.assertRaises(IndexError, l.remove, 0)
+        self.assertEqual(l[3:], [])
+        self.assertEqual(l[:3], [])
+        self.assertRaises(IndexError, lambda: l[3])
+        self.assertRaises(IndexError, lambda: l[-1])
+        self.assertRaises(IndexError, lambda: l.set(2, 'foo'))
+        self.assertRaises(IndexError, lambda: l.set(0, 'foo'))
+
+        # Cannot insert into an empty list at a non-zero location.
+        self.assertRaises(IndexError, lambda: l.insert(1, 'foo'))
+        self.assertEqual(l.insert(0, 'bar'), 1)
+        self.assertEqual(l[:], ['bar'])
+        l.clear()
+        self.assertEqual(l.insert(-1, 'baz'), 1)
+        self.assertEqual(l[:], ['baz'])
+        self.assertRaises(IndexError, lambda: l.insert(2, 'foo'))
+        self.assertEqual(l.insert(-1, 'nug'), 2)
+        self.assertEqual(l[:], ['nug', 'baz'])
+
+    def test_list_unpack(self):
+        l = self.db.List('l1')
+        l.extend(['i%s' % i for i in range(10)])
+
+        # Simple case.
+        self.assertEqual(l.unpack(), 10)
+        self.assertEqual(self.db.count(), 11)
+
+        expected = {
+            'l1:%04d' % i: 'i%s' % i
+            for i in range(10)}
+        self.assertEqual(self.db.get_bulk(list(expected)), expected)
+
+        # With parameters. Will store i3..i6 in p1:00 -> p1:03.
+        self.assertEqual(l.unpack(3, -3, 'p1:', '%02d'), 4)
+        expected = {'p1:%02d' % i: 'i%s' % (i + 3) for i in range(4)}
+        self.assertEqual(self.db.get_bulk(list(expected)), expected)
+        self.assertEqual(self.db['p1:00'], 'i3')
+        self.assertEqual(self.db['p1:03'], 'i6')
+
+    def test_list_pack(self):
+        l = self.db.List('l1')
+        self.db.set_bulk({'k%02d' % i: 'i%s' % i for i in range(10)})
+        self.assertEqual(l.pack(), 10)
+        self.assertEqual(l.get_range(), ['i%s' % i for i in range(10)])
+        l.clear()
+
+        l = self.db.List('a1')
+        l.extend(['foo', 'bar'])
+        def reset():
+            self.assertEqual(l.remove_range(2), 2)
+            self.assertEqual(l.get_range(), ['foo', 'bar'])
+
+        self.assertEqual(l.pack('k01', 'k04'), 3)
+        self.assertEqual(l.get_range(), ['foo', 'bar', 'i1', 'i2', 'i3'])
+        reset()
+
+        # Look at behavior of partial keys.
+        self.assertEqual(l.pack('k03x', 'k05x'), 2)
+        self.assertEqual(l.get_range(), ['foo', 'bar', 'i4', 'i5'])
+        reset()
+
+        self.assertEqual(l.pack('k08'), 2)
+        self.assertEqual(l.get_range(), ['foo', 'bar', 'i8', 'i9'])
+        reset()
+
+        # Move list to end of database.
+        old_key = l.key
+        ldata = self.db.get_bytes(old_key)
+        l.key = 'z1'
+        self.db.set(l.key, ldata, encode_value=False)
+        self.db.remove(old_key)
+
+        self.assertEqual(l.pack(stop='k02'), 2)
+        self.assertEqual(l.get_range(), ['foo', 'bar', 'i0', 'i1'])
+        reset()
+
+        self.assertEqual(l.pack(start='zz'), 0)
+        self.assertEqual(l.pack(start='zz', stop='zzz'), 0)
+        self.assertEqual(l.pack(start='a', stop='aa'), 0)
+        self.assertEqual(l.pack(stop='aa'), 0)
+        self.assertEqual(l.pack('k2', 'k4', 0), 0)
+        self.assertEqual(l.get_range(), ['foo', 'bar'])
 
 
 class TestKyotoTycoonScriptingSerialization(BaseTestCase):
