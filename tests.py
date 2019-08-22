@@ -782,8 +782,8 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
 
         # Restore all keys.
         L.sadd(key='s1', **{str(i): k for i, k in enumerate(keys)})
-        self.assertEqual(L.srem(key='s1', value='nug'), {'num': '1'})
-        self.assertEqual(L.srem(key='s1', value='nug'), {'num': '0'})
+        self.assertEqual(L.srem(key='s1', x='nug'), {'num': '1'})
+        self.assertEqual(L.srem(key='s1', x='nug'), {'num': '0'})
 
         # Create another set, s2 {baze, foo, zai}.
         L.sadd(key='s2', a='baze', b='foo', c='zai')
@@ -1218,6 +1218,167 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         self.assertEqual(self.db.deserialize_dict(db2.get('h2')),
                          {'k1': 'v1', 'k3': 'v3'})
         db2.close_all()
+
+
+class TestLuaContainers(BaseLuaTestCase):
+    server_kwargs = {
+        'serializer': KT_PICKLE,
+        'database': '%',
+        'server_args': ['-scr', BaseLuaTestCase.lua_script]}
+
+    def test_hash(self):
+        data = {
+            'k1': 'v1',
+            'k2': ['i0', 'i1', 'i2'],
+            'k3': {'x1': 'y1', 'x2': 'y2'}}
+
+        h = self.db.Hash('h1')
+        self.assertEqual(h.set_bulk(data), 3)
+        self.assertEqual(h.set_bulk({}), 0)
+        self.assertEqual(h.get_bulk(['k1', 'k2', 'k3', 'kx']), data)
+        self.assertEqual(h.get_bulk(['x1', 'x2']), {})
+
+        self.assertEqual(h['k2'], ['i0', 'i1', 'i2'])
+        self.assertTrue(h['kx'] is None)
+
+        h['k4'] = ['foo', 'baz']
+        self.assertEqual(h.setnx('k1', 'v1-x'), 0)
+        self.assertEqual(h.set('k1', 'v1-y'), 1)
+        self.assertEqual(len(h), 4)
+
+        self.assertEqual(h.remove_bulk(['k1', 'k3', 'kx']), 2)
+        self.assertEqual(h.remove_bulk(['k1', 'k3', 'kx']), 0)
+        self.assertEqual(len(h), 2)
+        self.assertEqual(h.get_all(),
+                         {'k2': ['i0', 'i1', 'i2'], 'k4': ['foo', 'baz']})
+
+        self.assertEqual(h.remove('k2'), 1)
+        self.assertEqual(h.remove('k2'), 0)
+        self.assertEqual(h.get_all(), {'k4': ['foo', 'baz']})
+
+        self.assertTrue('k4' in h)
+        self.assertFalse('k2' in h)
+
+        h.set('k1', 'v1-z')
+        h.set('k3', 'v3-z')
+        del h['k4']
+        self.assertEqual(h['k1'], 'v1-z')
+        self.assertEqual(h.get_all(), {'k1': 'v1-z', 'k3': 'v3-z'})
+
+        # Ensure that the data is stored in the right key.
+        self.assertTrue(self.db.get_bytes('h1') is not None)
+        self.assertEqual(self.db.count(), 1)
+
+    def test_set(self):
+        s = self.db.Set('s1')
+        self.assertEqual(s.add('k1'), 1)
+        self.assertEqual(s.add('k1'), 0)
+        self.assertEqual(s.add_bulk(['k2', 'k3', 'k4', 'k1']), 3)
+        self.assertEqual(s.add_bulk(['k2', 'k3', 'k4', 'k1']), 0)
+        self.assertEqual(len(s), 4)
+        self.assertTrue('k1' in s)
+        self.assertFalse('kx' in s)
+
+        data = set(('k1', 'k2', 'k3', 'k4'))
+        self.assertEqual(s.members(), data)
+        self.assertTrue(s.pop() in data)
+        self.assertTrue(s.pop() in data)
+        self.assertEqual(s.count(), 2)
+
+        self.assertEqual(s.add_bulk(data), 2)
+        self.assertEqual(s.members(), data)
+
+        self.assertEqual(s.remove('k2'), 1)
+        self.assertEqual(s.remove('k2'), 0)
+
+        self.assertEqual(s.remove_bulk(('k1', 'k3', 'kx')), 2)
+        self.assertEqual(s.remove_bulk(('k1', 'k3', 'kx')), 0)
+        self.assertEqual(s.members(), set(('k4',)))
+
+        self.assertTrue(self.db.exists('s1'))
+        self.assertEqual(self.db.count(), 1)
+
+        # Verify that serialization works correctly.
+        s2 = self.db.Set('s2')
+        items = [100, 13.37, False, None, ('foo', 'bar')]
+        s2.add(*items)
+        self.assertEqual(s2.members(), set(items))
+        for item in items:
+            self.assertTrue(item in s2)
+        self.assertTrue(s2.pop() in items)
+        self.assertTrue(s2.pop() in items)
+        self.assertEqual(len(s2), 3)
+
+    def test_list(self):
+        l = self.db.List('l1')
+        self.assertEqual(l.append('i2'), 1)
+        self.assertEqual(l.appendleft('i1'), 2)
+        self.assertEqual(l.appendright('i4'), 3)
+        self.assertEqual(l.insert(2, 'i3'), 4)
+        self.assertEqual(l.get_range(), ['i1', 'i2', 'i3', 'i4'])
+
+        l[2] = 'i3-x'
+        self.assertEqual(l[:], ['i1', 'i2', 'i3-x', 'i4'])
+        self.assertEqual(l.popleft(), 'i1')
+        self.assertEqual(l.popright(), 'i4')
+
+        l.append('i5-y')
+        l.insert(-1, 'i4-y')
+        self.assertEqual(l[:], ['i2', 'i3-x', 'i4-y', 'i5-y'])
+        l.set(3, 'i5-z')
+        self.assertEqual(l.pop(2), 'i4-y')
+        self.assertEqual(l.pop(2), 'i5-z')
+        self.assertEqual(len(l), 2)
+        self.assertEqual(l[:], ['i2', 'i3-x'])
+
+        l.insert(0, 'i1')
+        l.append('i4')
+        self.assertEqual(len(l), 4)
+        self.assertEqual(l[1:-1], ['i2', 'i3-x'])
+
+        self.assertTrue(self.db.exists('l1'))
+        self.assertEqual(self.db.count(), 1)
+
+    def test_list_find(self):
+        l = self.db.List('l1')
+        l.extend(['i1', 'i2', 'i3', 'i2', 'i1'])
+        self.assertEqual(l.find('i1'), 0)
+        self.assertEqual(l.rfind('i1'), 4)
+        self.assertEqual(l.find('i2'), 1)
+        self.assertEqual(l.rfind('i2'), 3)
+        self.assertEqual(l.find('i3'), 2)
+        self.assertEqual(l.rfind('i3'), 2)
+
+        self.assertTrue(l.find('ix') is None)
+        self.assertTrue(l.rfind('ix') is None)
+
+    def test_list_ranges(self):
+        l = self.db.List('l1')
+        # Set list to i0...i9.
+        self.assertEqual(l.extend(['i2']), 1)
+        self.assertEqual(l.extend(['i3', 'i4', 'i5', 'i6', 'i7']), 6)
+        self.assertEqual(l.insert(0, 'i1'), 7)
+        self.assertEqual(l.appendleft('i0'), 8)
+        self.assertEqual(l.extend(['i8', 'i9']), 10)
+        self.assertEqual(l.get_range(), ['i%s' % i for i in range(10)])
+
+        self.assertEqual(l.get_range(8), ['i8', 'i9'])
+        self.assertEqual(l.get_range(2, 4), ['i2', 'i3'])
+        self.assertEqual(l.get_range(3, -3), ['i3', 'i4', 'i5', 'i6'])
+        self.assertEqual(l.get_range(-3, -1), ['i7', 'i8'])
+
+        self.assertEqual(l.remove_range(8), 8)
+        self.assertEqual(l.remove_range(3, 6), 5)
+        self.assertEqual(l.get_range(), ['i0', 'i1', 'i2', 'i6', 'i7'])
+
+        self.assertEqual(l.remove_range(-3, -1), 3)
+        self.assertEqual(l.get_range(), ['i0', 'i1', 'i7'])
+
+        self.assertEqual(l.remove_range(-3, 1), 2)
+        self.assertEqual(l.get_range(), ['i1', 'i7'])
+
+        self.assertEqual(l.remove_range(), 0)
+        self.assertEqual(l.get_range(), [])
 
 
 class TestKyotoTycoonScriptingSerialization(BaseTestCase):

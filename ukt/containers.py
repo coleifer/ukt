@@ -30,16 +30,16 @@ class Container(object):
 class Hash(Container):
     key_field = 'table_key'
 
-    def mset(self, __data=None, **kwargs):
+    def set_bulk(self, __data=None, **kwargs):
         if __data is not None:
             kwargs.update(__data)
         out = self.lua('hmset', kwargs, decode=False)
         return int(out[b'num'])
 
-    def mget(self, keys):
+    def get_bulk(self, keys):
         return self.lua('hmget', {key: '' for key in keys})
 
-    def mdelete(self, keys):
+    def remove_bulk(self, keys):
         out = self.lua('hmdel', {key: '' for key in keys}, decode=False)
         return int(out[b'num'])
 
@@ -55,9 +55,11 @@ class Hash(Container):
         return int(out[b'num'])
 
     def get(self, key):
-        return self.lua('hget', raw_data={'key': key})['value']
+        out = self.lua('hget', raw_data={'key': key})
+        if out:
+            return out['value']
 
-    def delete(self, key):
+    def remove(self, key):
         out = self.lua('hdel', decode=False, raw_data={'key': key})
         return int(out[b'num'])
 
@@ -72,17 +74,17 @@ class Hash(Container):
     __contains__ = contains
     __getitem__ = get
     __setitem__ = set
-    __delitem__ = delete
-    update = mset
+    __delitem__ = remove
+    update = set_bulk
 
 
 class Set(Container):
     key_field = 'key'
 
     def add(self, *values):
-        return self.madd(values)
+        return self.add_bulk(values)
 
-    def madd(self, values):
+    def add_bulk(self, values):
         out = self.lua('sadd', {str(i): v for i, v in enumerate(values)},
                        decode=False)
         return int(out[b'num'])
@@ -106,11 +108,16 @@ class Set(Container):
                 value = self.kt.decode_value(value)
             return value
 
-    def delete(self, value):
-        out = self.lua('srem', {'value': value}, decode=False)
+    def remove(self, *values):
+        return self.remove_bulk(values)
+
+    def remove_bulk(self, values):
+        out = self.lua('srem', {str(i): v for i, v in enumerate(values)},
+                       decode=False)
         return int(out[b'num'])
 
     __contains__ = contains
+    __delitem__ = remove
     __len__ = count
 
 
@@ -118,11 +125,16 @@ class List(Container):
     key_field = 'key'
 
     def appendleft(self, value):
-        self.lua('llpush', {'value': value})
+        return int(self.lua('llpush', {'value': value}, False)[b'length'])
 
     def append(self, value):
-        self.lua('lrpush', {'value': value})
+        return int(self.lua('lrpush', {'value': value}, False)[b'length'])
     appendright = append
+
+    def extend(self, values):
+        out = self.lua('lextend', {str(i): v for i, v in enumerate(values)},
+                       decode=False)
+        return int(out[b'length'])
 
     def get_range(self, start=None, stop=None):
         kwargs = {}
@@ -140,19 +152,33 @@ class List(Container):
             return out['value']
 
     def insert(self, index, value):
-        self.lua('linsert', {'value': value}, decode=True,
-                 raw_data={'index': index})
+        out = self.lua('linsert', {'value': value}, decode=False,
+                       raw_data={'index': index})
+        return int(out[b'length'])
+
+    def remove(self, index):
+        out = self.lua('lrem', decode=True, raw_data={'index': str(index)})
+        return out.get('value')
+
+    def remove_range(self, start=None, stop=None):
+        data = {}
+        if start is not None: data['start'] = str(start)
+        if stop is not None: data['stop'] = str(stop)
+        out = self.lua('lremrange', decode=False, raw_data=data)
+        return int(out[b'length'])
 
     def popleft(self):
         out = self.lua('llpop', decode=True)
         if out:
             return out['value']
 
-    def pop(self):
+    def popright(self):
         out = self.lua('lrpop', decode=True)
         if out:
             return out['value']
-    popright = pop
+
+    def pop(self, index=None):
+        return self.remove(index) if index is not None else self.popright()
 
     def length(self):
         out = self.lua('llen', decode=False)
@@ -162,10 +188,24 @@ class List(Container):
         self.lua('lset', {'value': value}, decode=True,
                  raw_data={'index': index})
 
+    def find(self, value):
+        out = self.lua('lfind', {'value': value}, decode=False)
+        idx = int(out[b'index'])
+        return idx if idx >= 0 else None
+
+    def rfind(self, value):
+        out = self.lua('lrfind', {'value': value}, decode=False)
+        idx = int(out[b'index'])
+        return idx if idx >= 0 else None
+
     def __getitem__(self, item):
         if isinstance(item, slice):
             return self.get_range(item.start, item.stop)
         return self.index(item)
 
     __setitem__ = set
+    __delitem__ = remove
     __len__ = length
+
+    def __contains__(self, value):
+        return self.find(value) is not None

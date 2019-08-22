@@ -335,24 +335,19 @@ function spop(inmap, outmap)
 end
 
 
--- Redis-like SREM functionality for removing a value from a set.
--- accepts: { key, value }
+-- Redis-like SREM functionality for removing one or more values from a set.
+-- accepts: { key, _: value1, _: value2... }
 -- returns: { num }
 function srem(inmap, outmap)
   local fn = function(k, v, i, o)
-    local value = i.value
-    if not value then
-      return nil, false
-    end
-
     local n = 0
-    local values = kt.split(value, "\1")
-    for i = 1, #values do
-      if v[values[i]] ~= nil then
+    for _, value in pairs(i) do
+      if v[value] ~= nil then
+        v[value] = nil
         n = n + 1
-        v[values[i]] = nil
       end
     end
+
     o.num = n
     if n > 0 then
       return v, true
@@ -481,7 +476,7 @@ end
 
 -- Redis-like LPUSH
 -- accepts: { key, value }
--- returns: {}
+-- returns: { length }
 function llpush(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
     local value = inmap.value
@@ -490,6 +485,7 @@ function llpush(inmap, outmap)
       return nil, false
     end
     table.insert(arr, 1, value)
+    outmap.length = #arr
     return arr, true
   end
   return lkv(inmap, outmap, fn)
@@ -497,7 +493,7 @@ end
 
 -- Redis-like RPUSH
 -- accepts: { key, value }
--- returns: {}
+-- returns: { length }
 function lrpush(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
     local value = inmap.value
@@ -506,6 +502,30 @@ function lrpush(inmap, outmap)
       return nil, false
     end
     table.insert(arr, value)
+    outmap.length = #arr
+    return arr, true
+  end
+  return lkv(inmap, outmap, fn)
+end
+
+
+-- Append multiple items to the end of a list.
+-- accepts: { key, 0: value1, 1: value2, ... }
+-- returns: {}
+function lextend(inmap, outmap)
+  local fn = function(key, arr, inmap, outmap)
+    -- First we need to sort the data.
+    local i = 0
+    while true do
+      local value = inmap[tostring(i)]
+      if value == nil then
+        break
+      else
+        table.insert(arr, value)
+        i = i + 1
+      end
+    end
+    outmap.length = #arr
     return arr, true
   end
   return lkv(inmap, outmap, fn)
@@ -547,8 +567,10 @@ function lrange(inmap, outmap)
       stop = arrsize
     end
 
-    for i = start, stop do
-      outmap[i - 1] = arr[i]
+    local n = 0
+    for i = start, stop, 1 do
+      outmap[tostring(n)] = arr[i]
+      n = n + 1
     end
     return nil, true
   end
@@ -574,11 +596,12 @@ end
 
 -- LINSERT -- zero-based.
 -- accepts: { key, index, value }
--- returns: {}
+-- returns: { length }
 function linsert(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
     local index, ok = _normalize_index(#arr, inmap.index)
     if not ok then
+      kt.log("system", "invalid list index in linsert()")
       return nil, false
     end
     if not inmap.value then
@@ -586,6 +609,7 @@ function linsert(inmap, outmap)
       return nil, false
     end
     table.insert(arr, index, inmap.value)
+    outmap.length = #arr
     return arr, true
   end
   return lkv(inmap, outmap, fn)
@@ -612,6 +636,61 @@ function lrpop(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
     outmap.value = arr[#arr]
     arr[#arr] = nil
+    return arr, true
+  end
+  return lkv(inmap, outmap, fn)
+end
+
+
+-- LREM -- remove an item by index.
+-- accepts: { key, index }
+-- returns: { value }
+function lrem(inmap, outmap)
+  local fn = function(key, arr, inmap, outmap)
+    local index, ok = _normalize_index(#arr, inmap.index)
+    if not ok then
+      kt.log("system", "invalid list index in lrem()")
+      return nil, false
+    end
+    outmap.value = arr[index]
+    table.remove(arr, index)
+    return arr, true
+  end
+  return lkv(inmap, outmap, fn)
+end
+
+
+-- LREMRANGE -- remove a range of items by index from [start, stop).
+-- accepts: { key, start, stop }
+-- returns: { length }
+function lremrange(inmap, outmap)
+  local fn = function(key, arr, inmap, outmap)
+    local start = 1
+    local stop = #arr
+    local ok
+
+    if inmap.start then
+      start, ok = _normalize_index(#arr, inmap.start)
+      if not ok then
+        kt.log("system", "invalid start index in lremrange()")
+        return nil, false
+      end
+    end
+    if inmap.stop then
+      stop, ok = _normalize_index(#arr, inmap.stop)
+      if not ok then
+        kt.log("system", "invalid stop index in lremrange()")
+        return nil, false
+      elseif stop > 0 then
+        stop = stop - 1
+      end
+    end
+    if start > stop then start, stop = stop, start end
+
+    for i = stop, start, -1 do
+      table.remove(arr, i)
+    end
+    outmap.length = #arr
     return arr, true
   end
   return lkv(inmap, outmap, fn)
@@ -646,6 +725,43 @@ function lset(inmap, outmap)
     end
     arr[idx + 1] = inmap.value
     return arr, true
+  end
+  return lkv(inmap, outmap, fn)
+end
+
+
+-- LFIND -- returns index by value.
+-- accepts { key, value }
+-- returns { index (or -1) }
+function lfind(inmap, outmap)
+  local fn = function(key, arr, inmap, outmap)
+    outmap.index = -1
+    for i, value in ipairs(arr) do
+      if value == inmap.value then
+        outmap.index = i - 1
+        break
+      end
+    end
+    return nil, true
+  end
+  return lkv(inmap, outmap, fn)
+end
+
+
+-- LRFIND -- returns index by value searching from right-to-left.
+-- accepts { key, value }
+-- returns { index (or -1) }
+function lrfind(inmap, outmap)
+  local fn = function(key, arr, inmap, outmap)
+    outmap.index = -1
+    local i = 0
+    for i = #arr, 1, -1 do
+      if arr[i] == inmap.value then
+        outmap.index = i - 1
+        break
+      end
+    end
+    return nil, true
   end
   return lkv(inmap, outmap, fn)
 end
