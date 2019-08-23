@@ -1587,6 +1587,31 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(l.extend(values), n)
         self.assertEqual(l.get_range(), values)
 
+        h.pack_values('lp')
+        lp = self.db.List('lp')
+        self.assertEqual(len(lp), n)
+
+        s1 = self.db.Set('s1')
+        s1.add_bulk(values)
+        s1.remove_bulk(values[::3])
+
+        s2 = self.db.Set('s2')
+        s2.add_bulk(values)
+        s2.remove_bulk(values[::4])
+
+        self.assertEqual(len(s1), 133)
+        self.assertEqual(len(s2), 150)
+
+        si = self.db.Set('si')
+        i = s1.intersection(s2, dest=si)
+        self.assertEqual(len(si), 100)
+        self.assertEqual(len(si), len(i))
+
+        sd = self.db.Set('sd')
+        d = s1.difference(s2, dest=sd)
+        self.assertEqual(len(sd), 33)
+        self.assertEqual(len(sd), len(d))
+
     def test_hash_pack_keys_values(self):
         h = self.db.Hash('h')
         h.update({'k1': 'v1', 'k2': 'v2', 'k3': 'v3'})
