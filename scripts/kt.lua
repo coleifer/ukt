@@ -279,6 +279,54 @@ function hpack(inmap, outmap)
 end
 
 
+-- Helper for hpackkeys and hpackvalues.
+function _hpack_helper(inmap, outmap, f)
+  local db_idx = inmap.db
+  local db = _select_db(inmap)
+  inmap.db = db_idx
+
+  local list_key = inmap.key
+  if not list_key then
+    kt.log("system", "hpacklist function missing 'key'")
+    return kt.RVEINVALID
+  end
+
+  local fn = function(k, v, i, o)
+    local accum = {}
+    local n = 0
+    for key, value in pairs(v) do
+      table.insert(accum, f(key, value))
+      n = n + 1
+    end
+    if n > 0 then
+      if not db:set(list_key, kt.arraydump(accum)) then
+        kt.log("system", "hpacklist could not set list key")
+        return kt.RVEINTERNAL
+      end
+    end
+    o.num = n
+    return nil, true
+  end
+  return hkv(inmap, outmap, fn)
+end
+
+
+-- HPACKKEYS - pack keys into a LIST.
+-- accepts { table_key, key }
+-- returns { num }
+function hpackkeys(inmap, outmap, f)
+  return _hpack_helper(inmap, outmap, function(k, v) return k end)
+end
+
+
+-- HPACKVALUES - pack values into a LIST.
+-- accepts { table_key, key }
+-- returns { num }
+function hpackvalues(inmap, outmap, f)
+  return _hpack_helper(inmap, outmap, function(k, v) return v end)
+end
+
+
 -- helper function for set functions.
 function skv(inmap, outmap, fn)
   local key = inmap.key
@@ -578,7 +626,6 @@ end
 -- returns: {}
 function lextend(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
-    -- First we need to sort the data.
     local i = 0
     while true do
       local value = inmap[tostring(i)]

@@ -1550,6 +1550,107 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(l.extend(values), n)
         self.assertEqual(l.get_range(), values)
 
+    def test_hash_pack_keys_values(self):
+        h = self.db.Hash('h')
+        h.update({'k1': 'v1', 'k2': 'v2', 'k3': 'v3'})
+        # h.pack_keys('hk')  # Un-testable with pickle serialization.
+        self.assertEqual(h.pack_values('hv'), 3)
+
+        # lk = self.db.List('hk')
+        lv = self.db.List('hv')
+        # self.assertEqual(sorted(lk.get_range()), ['k1', 'k2', 'k3'])
+        self.assertEqual(sorted(lv.get_range()), ['v1', 'v2', 'v3'])
+
+        h = self.db.Hash('h2')
+        self.assertEqual(h.pack_values('hv2'), 0)
+        self.assertFalse(self.db.exists('hv2'))
+
+
+class TestLuaContainersMultiDB(BaseLuaTestCase):
+    server_kwargs = {
+        'database': '%',
+        'server_args': ['-scr', BaseLuaTestCase.lua_script, '*']}
+
+    def test_hash_multidb(self):
+        self.db.set_database(1)
+        h = self.db.Hash('h1')
+        h.update(k1='v1', k2='v2', k3='v3')
+        self.assertEqual(h.get_all(), {'k1': 'v1', 'k2': 'v2', 'k3': 'v3'})
+        self.assertEqual(h['k2'], 'v2')
+        self.assertTrue('k1' in h)
+        self.assertFalse('kx' in h)
+        self.assertTrue(h.set('k1', 'v1-x'))
+        self.assertFalse(h.setnx('k2', 'v2-x'))
+        self.assertEqual(h.remove('k3'), 1)
+        self.assertEqual(h.get_all(), {'k1': 'v1-x', 'k2': 'v2'})
+        self.assertEqual(h.get_bulk(['k1', 'kx']), {'k1': 'v1-x'})
+        self.assertEqual(len(h), 2)
+
+        h2 = self.db.Hash('h1', db=0)
+        self.assertEqual(len(h2), 0)
+
+        lk = self.db.List('hk')
+        lv = self.db.List('hv')
+        self.assertEqual(h.pack_keys(lk.key), 2)
+        self.assertEqual(h.pack_values(lv.key), 2)
+        self.assertEqual(sorted(lk.get_range()), ['k1', 'k2'])
+        self.assertEqual(sorted(lv.get_range()), ['v1-x', 'v2'])
+
+        # Verify the key is in the correct database.
+        keys = ('h1', 'hk', 'hv')
+        for k in keys:
+            self.assertFalse(self.db.exists(k, db=0))
+            self.assertTrue(self.db.exists(k, db=1))
+
+    def test_set_multidb(self):
+        self.db.set_database(1)
+        s = self.db.Set('s1')
+        self.assertEqual(s.add_bulk(['k1', 'k2', 'k3']), 3)
+        self.assertEqual(len(s), 3)
+        self.assertEqual(s.remove('k2'), 1)
+        self.assertEqual(s.members(), {'k1', 'k3'})
+        self.assertTrue('k1' in s)
+        self.assertFalse('k2' in s)
+        self.assertEqual(len(s), 2)
+
+        s2 = self.db.Set('s1', db=0)
+        self.assertEqual(len(s2), 0)
+
+        self.assertFalse(self.db.exists(s.key, db=0))
+        self.assertTrue(self.db.exists(s.key, db=1))
+
+    def test_list_multidb(self):
+        self.db.set_database(1)
+        l = self.db.List('l1')
+        self.assertEqual(l.extend(['i2']), 1)
+        self.assertEqual(l.appendleft('i1'), 2)
+        self.assertEqual(l.append('i3'), 3)
+        self.assertEqual(l.get_range(), ['i1', 'i2', 'i3'])
+        self.assertEqual(len(l), 3)
+        self.assertEqual(l[2], 'i3')
+        self.assertRaises(IndexError, lambda: l[4])
+        self.assertEqual(l.pop(1), 'i2')
+        self.assertEqual(l.popright(), 'i3')
+        self.assertEqual(l.insert(0, 'i0'), 2)
+        self.assertEqual(len(l), 2)
+        self.assertEqual(l.find('i1'), 1)
+        self.assertEqual(l.rfind('i1'), 1)
+        self.assertEqual(l.find('ix'), None)
+        self.assertEqual(l.rfind('ix'), None)
+        self.assertEqual(l.get_range(), ['i0', 'i1'])
+
+        self.assertEqual(l.unpack(prefix='p:'), 2)
+        lp = self.db.List('lp')
+        self.assertEqual(lp.pack(start='p:', stop='q'), 2)
+        self.assertEqual(lp.get_range(), ['i0', 'i1'])
+
+        l2 = self.db.List('l1', db=0)
+        self.assertEqual(len(l2), 0)
+
+        for key in ('l1', 'lp'):
+            self.assertFalse(self.db.exists(key, db=0))
+            self.assertTrue(self.db.exists(key, db=1))
+
 
 class TestKyotoTycoonScriptingSerialization(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')

@@ -18,17 +18,20 @@ class Container(object):
     """
     key_field = None
 
-    def __init__(self, kt, key, encode_values=True, decode_values=True):
+    def __init__(self, kt, key, encode_values=True, decode_values=True,
+                 db=None):
         self.kt = kt
         self.key = key
         self.encode_values = encode_values
         self.decode_values = decode_values
+        self.db = db
 
     def lua(self, func, data=None, decode=None, raw_data=None):
         # We need to pass the container key, e.g. "table_key", without any
         # special serialization. Everything else may be serialized using the
         # configured serializer, however.
-        accum = {self.key_field: self.key}
+        db = self.db if self.db is not None else self.kt.default_db
+        accum = {self.key_field: self.key, 'db': db}
         if raw_data:
             accum.update(raw_data)
 
@@ -104,6 +107,18 @@ class Hash(Container):
         if stop is not None: data['stop'] = stop
         if count is not None: data['count'] = str(count)
         out = self.lua('hpack', decode=False, raw_data=data)
+        return int(out[b'num'])
+
+    def pack_keys(self, key):
+        # Note that keys are *not* serialized in hashes, so if you are using
+        # a serialization like json/pickle/msgpack, the keys will be unreadable
+        # using the List container functionality, which expects list items to
+        # be serialized.
+        out = self.lua('hpackkeys', decode=False, raw_data={'key': key})
+        return int(out[b'num'])
+
+    def pack_values(self, key):
+        out = self.lua('hpackvalues', decode=False, raw_data={'key': key})
         return int(out[b'num'])
 
     __len__ = length

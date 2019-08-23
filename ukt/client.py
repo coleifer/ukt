@@ -1476,23 +1476,23 @@ class KyotoTycoon(object):
         if out:
             return int(out[b'code']), decode(out[b'message'])
 
-    def Hash(self, key, encode_values=True, decode_values=True):
+    def Hash(self, key, encode_values=True, decode_values=True, db=None):
         """
         Create a :py:class:`Hash` container instance.
         """
-        return Hash(self, key, encode_values, decode_values)
+        return Hash(self, key, encode_values, decode_values, db)
 
-    def List(self, key, encode_values=True, decode_values=True):
+    def List(self, key, encode_values=True, decode_values=True, db=None):
         """
         Create a :py:class:`List` container instance.
         """
-        return List(self, key, encode_values, decode_values)
+        return List(self, key, encode_values, decode_values, db)
 
-    def Set(self, key, encode_values=True, decode_values=True):
+    def Set(self, key, encode_values=True, decode_values=True, db=None):
         """
         Create a :py:class:`Set` container instance.
         """
-        return Set(self, key, encode_values, decode_values)
+        return Set(self, key, encode_values, decode_values, db)
 
 
 class Cursor(object):
