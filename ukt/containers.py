@@ -170,9 +170,28 @@ class Set(Container):
                        decode=False)
         return int(out[b'num'])
 
+    def _multi_store(self, fn, other, dest=None):
+        raw_data = {'key2': other.key if isinstance(other, Set) else other}
+        if dest is not None:
+            raw_data['dest'] = dest.key if isinstance(other, Set) else dest
+        out = self.lua(fn, decode=True, raw_data=raw_data)
+        return set(out.values())
+
+    def intersection(self, other, dest=None):
+        return self._multi_store('sinter', other, dest)
+
+    def union(self, other, dest=None):
+        return self._multi_store('sunion', other, dest)
+
+    def difference(self, other, dest=None):
+        return self._multi_store('sdiff', other, dest)
+
     __contains__ = contains
     __delitem__ = remove
     __len__ = count
+    __and__ = intersection
+    __or__ = union
+    __sub__ = difference
 
 
 class List(Container):

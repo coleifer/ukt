@@ -789,17 +789,17 @@ class TestKyotoTycoonScripting(BaseLuaTestCase):
         L.sadd(key='s2', a='baze', b='foo', c='zai')
 
         # Test multiple set operations, {bar, baz, foo} | {baze, foo, zai}.
-        res = L.sinter(key1='s1', key2='s2').values()
+        res = L.sinter(key='s1', key2='s2').values()
         self.assertEqual(sorted(res), ['foo'])
-        res = L.sunion(key1='s1', key2='s2').values()
+        res = L.sunion(key='s1', key2='s2').values()
         self.assertEqual(sorted(res), ['bar', 'baz', 'baze', 'foo', 'zai'])
 
-        res = L.sdiff(key1='s1', key2='s2').values()
+        res = L.sdiff(key='s1', key2='s2').values()
         self.assertEqual(sorted(res), ['bar', 'baz'])
-        res = L.sdiff(key1='s2', key2='s1').values()
+        res = L.sdiff(key='s2', key2='s1').values()
         self.assertEqual(sorted(res), ['baze', 'zai'])
 
-        res = L.sdiff(key1='s1', key2='s2', dest='s3').values()
+        res = L.sdiff(key='s1', key2='s2', dest='s3').values()
         self.assertEqual(sorted(res), ['bar', 'baz'])
         res = L.smembers(key='s3').values()
         self.assertEqual(sorted(res), ['bar', 'baz'])
@@ -1365,6 +1365,43 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertTrue(s3.pop() is None)
         self.assertEqual(s3.remove('xx'), 0)
         self.assertEqual(s3.members(), set())
+
+    def test_set_operations(self):
+        s1 = self.db.Set('s1')
+        s2 = self.db.Set('s2')
+        sx = self.db.Set('sx')
+        s1.add('k1', 'k2', 'k3')
+        s2.add('k3', 'k4', 'k5')
+
+        self.assertEqual(s1.intersection(s2), set(('k3',)))
+        self.assertEqual(s1.union(s2), set(('k1', 'k2', 'k3', 'k4', 'k5')))
+        self.assertEqual(s1.difference(s2), set(('k1', 'k2')))
+
+        self.assertEqual(s2.intersection(s1), set(('k3',)))
+        self.assertEqual(s2.union(s1), set(('k1', 'k2', 'k3', 'k4', 'k5')))
+        self.assertEqual(s2.difference(s1), set(('k4', 'k5')))
+
+        # Compare against empty/missing set.
+        self.assertEqual(s1.intersection(sx), set())
+        self.assertEqual(s1.union(sx), set(('k1', 'k2', 'k3')))
+        self.assertEqual(s1.difference(sx), set(('k1', 'k2', 'k3')))
+        self.assertEqual(sx.intersection(s1), set())
+        self.assertEqual(sx.union(s1), set(('k1', 'k2', 'k3')))
+        self.assertEqual(sx.difference(s1), set())
+
+        # Store results.
+        self.assertEqual(s1.intersection(s2, dest=sx), set(('k3',)))
+        self.assertEqual(sx.members(), set(('k3',)))
+        sx.clear()
+
+        self.assertEqual(s1.union(s2, dest=sx),
+                         set(('k1', 'k2', 'k3', 'k4', 'k5')))
+        self.assertEqual(sx.members(), set(('k1', 'k2', 'k3', 'k4', 'k5')))
+        sx.clear()
+
+        self.assertEqual(s1.difference(s2, dest=sx), set(('k1', 'k2')))
+        self.assertEqual(sx.members(), set(('k1', 'k2')))
+        sx.clear()
 
     def test_list(self):
         l = self.db.List('l1')

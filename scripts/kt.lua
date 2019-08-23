@@ -473,9 +473,9 @@ end
 
 -- helper function for set operations on 2 keys.
 function svv(inmap, outmap, fn)
-  local key1, key2 = inmap.key1, inmap.key2
+  local key1, key2 = inmap.key, inmap.key2
   if not key1 or not key2 then
-    kt.log("system", "set function missing required: 'key1' or 'key2'")
+    kt.log("system", "set function missing required: 'key' or 'key2'")
     return kt.RVEINVALID
   end
   local db = _select_db(inmap) -- Allow db to be specified as argument.
@@ -502,7 +502,7 @@ end
 
 
 -- Redis-like SINTER functionality for finding intersection of 2 sets.
--- accepts: { key1, key2, (dest) }
+-- accepts: { key, key2, (dest) }
 -- returns: { ... }
 function sinter(inmap, outmap)
   local fn = function(v1, v2, i, o)
@@ -520,7 +520,7 @@ end
 
 
 -- Redis-like SUNION functionality for finding union of 2 sets.
--- accepts: { key1, key2, (dest) }
+-- accepts: { key, key2, (dest) }
 -- returns: { ... }
 function sunion(inmap, outmap)
   local fn = function(v1, v2, i, o)
@@ -542,7 +542,7 @@ end
 
 
 -- Redis-like SDIFF functionality for finding difference of set1 and set2.
--- accepts: { key1, key2, (dest) }
+-- accepts: { key, key2, (dest) }
 -- returns: { ... }
 function sdiff(inmap, outmap)
   local fn = function(v1, v2, i, o)
