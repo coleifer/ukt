@@ -1772,10 +1772,11 @@ end
 
 -- get luajit version.
 function jit_version(inmap, outmap)
-  outmap.version = "v" .. jit.version
+  outmap.version = jit.version or "<not present>"
   return kt.RVSUCCESS
 end
 
 if kt.thid == 0 then
-  kt.log("system", "luajit version: " .. jit.version)
+  local version = jit.version or "<not present>"
+  kt.log("system", "luajit version: " .. version)
 end
