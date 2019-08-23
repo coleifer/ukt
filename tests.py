@@ -1410,6 +1410,10 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(l.appendright('i4'), 3)
         self.assertEqual(l.insert(2, 'i3'), 4)
         self.assertEqual(l.get_range(), ['i1', 'i2', 'i3', 'i4'])
+        self.assertEqual(l[0], 'i1')
+        self.assertEqual(l[1], 'i2')
+        self.assertEqual(l[-1], 'i4')
+        self.assertEqual(l[-2], 'i3')
 
         l[2] = 'i3-x'
         self.assertEqual(l[:], ['i1', 'i2', 'i3-x', 'i4'])
