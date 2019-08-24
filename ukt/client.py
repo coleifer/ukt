@@ -415,10 +415,17 @@ class KyotoTycoon(object):
                 key = sock.recv(klen)
                 value = sock.recv(vlen)
                 if self.decode_keys:
-                    key = decode(key)
-                if decode_values:
-                    value = self.decode_value(value)
+                    try:
+                        key = decode(key)
+                    except UnicodeDecodeError:
+                        pass
                 accum[key] = value
+
+            # Decode values in 2nd pass so that a failure to decode doesn't
+            # leave the socket in an invalid state.
+            if decode_values:
+                for key in accum:
+                    accum[key] = self.decode_value(accum[key])
 
         return accum
 
@@ -453,10 +460,15 @@ class KyotoTycoon(object):
                 key = sock.recv(klen)
                 value = sock.recv(vlen)
                 if self.decode_keys:
-                    key = decode(key)
-                if decode_values:
-                    value = self.decode_value(value)
+                    try:
+                        key = decode(key)
+                    except UnicodeDecodeError:
+                        pass
                 accum.append((db, key, value, xt))
+
+            if decode_values:
+                accum = [(db, key, self.decode_value(value), xt)
+                         for (db, key, value, xt) in accum]
 
         return accum
 
@@ -688,10 +700,15 @@ class KyotoTycoon(object):
                 key = sock.recv(klen)
                 value = sock.recv(vlen)
                 if decode_keys:
-                    key = decode(key)
-                if decode_values:
-                    value = self.decode_value(value)
+                    try:
+                        key = decode(key)
+                    except UnicodeDecodeError:
+                        pass
                 accum[key] = value
+
+            if decode_values:
+                for key in accum:
+                    accum[key] = self.decode_value(accum[key])
 
         return accum
 
@@ -737,7 +754,10 @@ class KyotoTycoon(object):
                 key, value = decoder(key), decoder(value)
 
             if decode_keys:
-                key = decode(key)
+                try:
+                    key = decode(key)
+                except UnicodeDecodeError:
+                    pass
             accum[key] = value
 
         return accum

@@ -57,6 +57,10 @@ class BaseTestCase(unittest.TestCase):
         if self.server is None:
             raise NotImplementedError
 
+    def get_client(self, serializer):
+        return KyotoTycoon(self._server.host, self._server.port,
+                           serializer=serializer)
+
 
 class KyotoTycoonTests(object):
     def test_basic_operations(self):
@@ -301,6 +305,32 @@ class KyotoTycoonTests(object):
         self.assertEqual(accum[b'path'],
                          self.server_kwargs['database'].encode('utf8'))
 
+    def test_decoding_errors_handling(self):
+        keys = [b'foo\xfe\xff', b'bar\x00\xffnug']
+        for key in keys:
+            self.db.set(key, 'testing')
+
+        for key in keys:
+            self.assertEqual(self.db.get(key), 'testing')
+
+        self.assertEqual(self.db.get_bulk(keys),
+                         dict(zip(keys, ('testing', 'testing'))))
+        dbkeys = [(0, key) for key in keys]
+        self.assertEqual([i[1:-1] for i in self.db.get_bulk_details(dbkeys)],
+                         [(keys[0], 'testing'), (keys[1], 'testing')])
+
+        self.db.set_bulk({'k1': 'v1', 'k2': 'v2'})
+
+        # What happens if we try to unpickle data that is not pickled?
+        db = self.get_client(KT_PICKLE)
+        db.set('k3', 'v3')
+        self.assertRaises(Exception, db.get_bulk, ['k1', 'k2'])
+        self.assertRaises(Exception, db.get_bulk_details, ['k1', 'k2'])
+        self.assertRaises(Exception, db.get, 'k1')
+
+        # Connection is still OK.
+        self.assertEqual(db.get('k3'), 'v3')
+
 
 class TestKyotoTycoonHash(KyotoTycoonTests, BaseTestCase):
     server_kwargs = {'database': '*'}
@@ -470,10 +500,6 @@ class TestKyotoTycoonCursor(BaseTestCase):
 
 class TestKyotoTycoonSerializers(BaseTestCase):
     server_kwargs = {'database': '*'}
-
-    def get_client(self, serializer):
-        return KyotoTycoon(self._server.host, self._server.port,
-                           serializer=serializer)
 
     def test_serializer_binary(self):
         db = self.get_client(KT_BINARY)
