@@ -54,6 +54,12 @@ def encode(obj):
 def decode(obj):
     return _decode(obj)
 
+def safe_decode(obj):
+    try:
+        return _decode(obj)
+    except UnicodeDecodeError:
+        return obj
+
 
 # Serialization method compatible with KyotoTycoon's lua "mapdump" function.
 def _serialize_dict(dict d):

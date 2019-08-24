@@ -57,6 +57,7 @@ from ukt.exceptions import ServerTimeoutError
 from ukt.exceptions import SignalTimeout
 from ukt.serializer import decode
 from ukt.serializer import encode
+from ukt.serializer import safe_decode
 from ukt.serializer import _deserialize_dict
 from ukt.serializer import _deserialize_list
 from ukt.serializer import _serialize_dict
@@ -415,10 +416,7 @@ class KyotoTycoon(object):
                 key = sock.recv(klen)
                 value = sock.recv(vlen)
                 if self.decode_keys:
-                    try:
-                        key = decode(key)
-                    except UnicodeDecodeError:
-                        pass
+                    key = safe_decode(key)
                 accum[key] = value
 
             # Decode values in 2nd pass so that a failure to decode doesn't
@@ -460,10 +458,7 @@ class KyotoTycoon(object):
                 key = sock.recv(klen)
                 value = sock.recv(vlen)
                 if self.decode_keys:
-                    try:
-                        key = decode(key)
-                    except UnicodeDecodeError:
-                        pass
+                    key = safe_decode(key)
                 accum.append((db, key, value, xt))
 
             if decode_values:
@@ -700,10 +695,7 @@ class KyotoTycoon(object):
                 key = sock.recv(klen)
                 value = sock.recv(vlen)
                 if decode_keys:
-                    try:
-                        key = decode(key)
-                    except UnicodeDecodeError:
-                        pass
+                    key = safe_decode(key)
                 accum[key] = value
 
             if decode_values:
@@ -754,10 +746,7 @@ class KyotoTycoon(object):
                 key, value = decoder(key), decoder(value)
 
             if decode_keys:
-                try:
-                    key = decode(key)
-                except UnicodeDecodeError:
-                    pass
+                key = safe_decode(key)
             accum[key] = value
 
         return accum
@@ -1247,7 +1236,7 @@ class KyotoTycoon(object):
         if status == 450:
             return
         key = r[b'key']
-        return decode(key) if self.decode_keys else key
+        return safe_decode(key) if self.decode_keys else key
 
     def cur_get_value(self, cursor_id, step=False, decode_value=True, **kw):
         data = {'step': ''} if step else {}
@@ -1264,7 +1253,7 @@ class KyotoTycoon(object):
             return
         key = resp[b'key']
         if self.decode_keys:
-            key = decode(key)
+            key = safe_decode(key)
         value = resp[b'value']
         if decode_value:
             value = self.decode_value(value)
@@ -1276,7 +1265,7 @@ class KyotoTycoon(object):
             return
         key = resp[b'key']
         if self.decode_keys:
-            key = decode(key)
+            key = safe_decode(key)
         value = resp[b'value']
         if decode_value:
             value = self.decode_value(value)
@@ -1494,7 +1483,7 @@ class KyotoTycoon(object):
         data = {'db': self.default_db if db is None else db}
         out = self.raw_script('get_error', data)
         if out:
-            return int(out[b'code']), decode(out[b'message'])
+            return int(out[b'code']), safe_decode(out[b'message'])
 
     def Hash(self, key, encode_values=True, decode_values=True, db=None):
         """
