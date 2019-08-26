@@ -1848,6 +1848,16 @@ class TestKyotoTycoonMultiDatabase(BaseTestCase):
         self.assertTrue(report['db_0'].endswith(b'path=*'))
         self.assertTrue(report['db_1'].endswith(b'path=%'))
 
+    def test_list_databases(self):
+        self.assertEqual(self.db.databases, ['*', '%'])
+
+        db_status = self.db.list_databases()
+        (hpath, hstatus), (tpath, tstatus) = db_status
+        self.assertEqual(hpath, '*')
+        self.assertEqual(hstatus['count'], 0)
+        self.assertEqual(tpath, '%')
+        self.assertEqual(tstatus['count'], 0)
+
     def test_multiple_databases_lua(self):
         db = KyotoTycoon(self._server.host, self._server.port,
                          serializer=KT_NONE)
