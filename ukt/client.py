@@ -17,6 +17,7 @@ import heapq
 import io
 import itertools
 import json
+import re
 import socket
 import struct
 import sys
@@ -63,6 +64,8 @@ from ukt.serializer import _deserialize_list
 from ukt.serializer import _serialize_dict
 from ukt.serializer import _serialize_list
 
+
+num_re = re.compile('-?\d+')
 
 quote_b = partial(quote_from_bytes, safe='')
 unquote_b = partial(unquote_to_bytes)
@@ -821,8 +824,46 @@ class KyotoTycoon(object):
         :param int db: database index.
         :return: a dictionary of metadata about the database.
         """
-        resp, status = self._request('/status', {}, db, decode_keys=True, **kw)
-        return resp
+        resp, st = self._request('/status', {}, db, decode_keys=True, **kw)
+        accum = {}
+        for key, value in resp.items():
+            value = decode(value)
+            if num_re.match(value):
+                value = int(value)
+            accum[key] = value
+
+        return accum
+
+    def list_databases(self):
+        """
+        Helper for reading database properties from report and status.
+
+        :return: list of 2-tuples consisting of database path and status dict.
+        """
+        return [(path, self.status(db=db)) for db, path
+                in enumerate(self.databases)]
+
+    @property
+    def databases(self):
+        """
+        :return: list of database paths.
+        """
+        accum = []
+        report = self.report(decode_keys=True)
+
+        for key, value in report.items():
+            if not key.startswith('db_'): continue
+            suffix = key.rsplit('_', 1)[-1]
+            if not suffix.isdigit(): continue
+
+            db_idx = int(suffix)
+
+            # Value is of the format: count=X size=Y path=Z. We ignore count
+            # and size, as we will pull these from the /status API anyways.
+            path = value.decode('utf8').split(' ', 2)[-1]
+            accum.append((db_idx, path.split('=', 1)[-1]))
+
+        return [path for _, path in sorted(accum)]
 
     def clear(self, db=None, **kw):
         """
