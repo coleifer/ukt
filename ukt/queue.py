@@ -41,6 +41,9 @@ class LuaQueue(object):
     def rpop(self, n=1):
         return self._item_list('queue_rpop', n)
 
+    def bpop(self):
+        return self._item_list('queue_bpop', 1)
+
     def peek(self, n=1):
         return self._item_list('queue_peek', n)
     def rpeek(self, n=1):

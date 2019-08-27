@@ -1156,8 +1156,8 @@ class TestLua(BaseLuaTestCase):
                                        b'i1', b'i3'])
         self.assertEqual(qb.remove('i3', n=5), 5)
         self.assertEqual(qb.remove('i0', n=10), 5)
-        self.assertEqual(qb.pop(), b'i2')
-        self.assertEqual(qb.pop(), b'i1')
+        self.assertEqual(qb.bpop(), b'i2')
+        self.assertEqual(qb.bpop(), b'i1')
         self.assertEqual(len(qb), 0)
 
         self.assertEqual(qa.remove('i7'), 1)

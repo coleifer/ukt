@@ -1345,6 +1345,26 @@ function queue_rpop(inmap, outmap)
 end
 
 
+-- blocking pop from head of queue
+-- accepts: { queue, db }
+-- returns { 0: data }
+function queue_bpop(inmap, outmap)
+  local cb = function(db, i, o)
+    local iter_cb = function(cursor, key, value, num)
+      o[tostring(num)] = value
+      return cursor:remove(), true
+    end
+    local t = 0.1
+    while _queue_iter(db, i.queue, 1, iter_cb) == 0 do
+      kt.sleep(t)
+      t = t * 1.15
+      if t > 1 then t = 1 end
+    end
+  end
+  return _qfn(inmap, outmap, {"queue"}, cb)
+end
+
+
 -- peek data from queue
 -- accepts: { queue, n, db }
 -- returns { idx: data, ... }
