@@ -332,19 +332,19 @@ class KyotoTycoonTests(object):
         self.assertEqual(db.get('k3'), 'v3')
 
 
-class TestKyotoTycoonHash(KyotoTycoonTests, BaseTestCase):
+class TestHash(KyotoTycoonTests, BaseTestCase):
     server_kwargs = {'database': '*'}
 
 
-class TestKyotoTycoonBTree(KyotoTycoonTests, BaseTestCase):
+class TestBTree(KyotoTycoonTests, BaseTestCase):
     server_kwargs = {'database': '%'}
 
 
-class TestKyotoTycoonCursor(BaseTestCase):
+class TestCursor(BaseTestCase):
     server_kwargs = {'database': '%'}
 
     def setUp(self):
-        super(TestKyotoTycoonCursor, self).setUp()
+        super(TestCursor, self).setUp()
         self.db.update({'k1': 'v1', 'k2': 'v2', 'k3': 'v3', 'k4': 'v4'})
 
     def test_multiple_cursors(self):
@@ -498,7 +498,7 @@ class TestKyotoTycoonCursor(BaseTestCase):
         self.assertEqual(list(c), [('k2', 'v2-b'), ('k3', 'v3')])
 
 
-class TestKyotoTycoonSerializers(BaseTestCase):
+class TestSerializers(BaseTestCase):
     server_kwargs = {'database': '*'}
 
     def test_serializer_binary(self):
@@ -765,7 +765,7 @@ class TestLuaErrorCode(BaseLuaTestCase):
         self.assertEqual(resp_msg, 'success')
 
 
-class TestKyotoTycoonScripting(BaseLuaTestCase):
+class TestLua(BaseLuaTestCase):
     def test_script_set(self):
         L = self.db.lua
 
@@ -1744,7 +1744,7 @@ class TestLuaContainersMultiDB(BaseLuaTestCase):
             self.assertTrue(self.db.exists(key, db=1))
 
 
-class TestKyotoTycoonScriptingSerialization(BaseTestCase):
+class TestLuaSerializers(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server_kwargs = {
         'serializer': KT_PICKLE,
@@ -1763,7 +1763,7 @@ class TestKyotoTycoonScriptingSerialization(BaseTestCase):
         self.assertEqual(vals, [{'item': 'i2'}, {'item': 'i1'}])
 
 
-class TestKyotoTycoonScriptingMultiDB(BaseTestCase):
+class TestLuaMultiDB(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '%']}
 
@@ -1832,12 +1832,12 @@ class TestKyotoTycoonScriptingMultiDB(BaseTestCase):
         self.assertEqual(L.lrpop(key='l1', db=1)['value'], 'i1')
 
 
-class TestKyotoTycoonMultiDatabase(BaseTestCase):
+class TestMultiDB(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '*']}
 
     def tearDown(self):
-        super(TestKyotoTycoonMultiDatabase, self).tearDown()
+        super(TestMultiDB, self).tearDown()
         self.db.clear(0)
         self.db.clear(1)
 
