@@ -9,31 +9,33 @@ class LuaQueue(object):
     Helper-class for working with the Kyoto Tycoon Lua queue functions.
     """
     def __init__(self, client, key, db=None):
-        self._client = client
+        self.kt = client
         self._key = key
         self._db = client.default_db if db is None else db
 
     def _lua(self, fn, **kwargs):
         kwargs.update(queue=self._key, db=self._db)
-        return self._client.script(fn, kwargs, encode_values=False,
-                                   decode_values=False)
+        return self.kt.script(fn, kwargs, encode_values=False,
+                              decode_values=False)
 
     def add(self, item):
+        item = self.kt.encode_value(item)
         return int(self._lua('queue_add', data=item)['id'])
 
     def extend(self, items):
-        args = {str(i): item for i, item in enumerate(items)}
+        args = {str(i): self.kt.encode_value(item)
+                for i, item in enumerate(items)}
         return int(self._lua('queue_madd', **args)['num'])
 
-    def _item_list(self, fn, n=1):
-        items = self._lua(fn, n=n)
+    def _item_list(self, fn, n=1, **kwargs):
+        items = self._lua(fn, n=n, **kwargs)
         if n == 1:
-            return items['0'] if items else None
+            return self.kt.decode_value(items['0']) if items else None
 
         accum = []
         if items:
             for key in sorted(items, key=int):
-                accum.append(items[key])
+                accum.append(self.kt.decode_value(items[key]))
         return accum
 
     def pop(self, n=1):
@@ -41,8 +43,9 @@ class LuaQueue(object):
     def rpop(self, n=1):
         return self._item_list('queue_rpop', n)
 
-    def bpop(self):
-        return self._item_list('queue_bpop', 1)
+    def bpop(self, timeout=None):
+        kwargs = {'timeout': str(timeout)} if timeout else {}
+        return self._item_list('queue_bpop', 1, **kwargs)
 
     def peek(self, n=1):
         return self._item_list('queue_peek', n)
@@ -56,10 +59,12 @@ class LuaQueue(object):
     def remove(self, data, n=None):
         if n is None:
             n = -1
+        data = self.kt.encode_value(data)
         return int(self._lua('queue_remove', data=data, n=n)['num'])
     def rremove(self, data, n=None):
         if n is None:
             n = -1
+        data = self.kt.encode_value(data)
         return int(self._lua('queue_rremove', data=data, n=n)['num'])
 
     def clear(self):

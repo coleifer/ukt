@@ -1346,9 +1346,15 @@ end
 
 
 -- blocking pop from head of queue
--- accepts: { queue, db }
--- returns { 0: data }
+-- accepts: { queue, db, timeout }
+-- returns { 0: data } or an empty response on timeout.
 function queue_bpop(inmap, outmap)
+  local cutoff
+  if inmap.timeout then
+    local timeout = tonumber(inmap.timeout)
+    cutoff = kt.time() + timeout
+  end
+
   local cb = function(db, i, o)
     local iter_cb = function(cursor, key, value, num)
       o[tostring(num)] = value
@@ -1356,6 +1362,7 @@ function queue_bpop(inmap, outmap)
     end
     local t = 0.1
     while _queue_iter(db, i.queue, 1, iter_cb) == 0 do
+      if cutoff and kt.time() >= cutoff then break end
       kt.sleep(t)
       t = t * 1.15
       if t > 1 then t = 1 end

@@ -1140,29 +1140,35 @@ class TestLua(BaseLuaTestCase):
         self.assertEqual(len(qa), 20)
         self.assertEqual(len(qb), 20)
 
-        self.assertEqual(qa.pop(), b'i0')
-        self.assertEqual(qa.rpop(), b'i19')
-        self.assertEqual(qa.pop(n=3), [b'i1', b'i2', b'i3'])
-        self.assertEqual(qa.rpop(n=3), [b'i18', b'i17', b'i16'])
-        self.assertEqual(qa.peek(n=3), [b'i4', b'i5', b'i6'])
-        self.assertEqual(qa.rpeek(n=3), [b'i15', b'i14', b'i13'])
+        self.assertEqual(qa.pop(), 'i0')
+        self.assertEqual(qa.rpop(), 'i19')
+        self.assertEqual(qa.pop(n=3), ['i1', 'i2', 'i3'])
+        self.assertEqual(qa.rpop(n=3), ['i18', 'i17', 'i16'])
+        self.assertEqual(qa.peek(n=3), ['i4', 'i5', 'i6'])
+        self.assertEqual(qa.rpeek(n=3), ['i15', 'i14', 'i13'])
 
         # i0, i1, i2, i3 ... x5.
         self.assertEqual(qb.remove('i1', n=4), 4)
         self.assertEqual(qb.rremove('i2', n=4), 4)
         self.assertEqual(len(qb), 12)
-        self.assertEqual(qb.peek(20), [b'i0', b'i2', b'i3', b'i0', b'i3',
-                                       b'i0', b'i3', b'i0', b'i3', b'i0',
-                                       b'i1', b'i3'])
+        self.assertEqual(qb.peek(20), ['i0', 'i2', 'i3', 'i0', 'i3',
+                                       'i0', 'i3', 'i0', 'i3', 'i0',
+                                       'i1', 'i3'])
         self.assertEqual(qb.remove('i3', n=5), 5)
         self.assertEqual(qb.remove('i0', n=10), 5)
-        self.assertEqual(qb.bpop(), b'i2')
-        self.assertEqual(qb.bpop(), b'i1')
+        self.assertEqual(qb.bpop(), 'i2')
+        self.assertEqual(qb.bpop(), 'i1')
         self.assertEqual(len(qb), 0)
 
         self.assertEqual(qa.remove('i7'), 1)
         self.assertEqual(qa.remove('i7'), 0)
-        self.assertEqual(qa.pop(n=5), [b'i4', b'i5', b'i6', b'i8', b'i9'])
+        self.assertEqual(qa.pop(n=5), ['i4', 'i5', 'i6', 'i8', 'i9'])
+
+    def test_queue_bpop(self):
+        qa = LuaQueue(self.db, 'qa')
+        qa.add('item')
+        self.assertEqual(qa.bpop(), 'item')
+        self.assertTrue(qa.bpop(timeout=0.1) is None)
 
     def test_hexastore(self):
         L = self.db.lua
