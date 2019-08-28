@@ -56,6 +56,8 @@ from ukt.exceptions import ServerConnectionError
 from ukt.exceptions import ServerError
 from ukt.exceptions import ServerTimeoutError
 from ukt.exceptions import SignalTimeout
+from ukt.queue import LuaQueue
+from ukt.queue import SignalQueue
 from ukt.serializer import decode
 from ukt.serializer import encode
 from ukt.serializer import safe_decode
@@ -1543,6 +1545,18 @@ class KyotoTycoon(object):
         Create a :py:class:`Set` container instance.
         """
         return Set(self, key, encode_values, decode_values, db)
+
+    def Queue(self, key, db=None):
+        """
+        Create a :py:class:`LuaQueue` instance.
+        """
+        return LuaQueue(self, key, db)
+
+    def SignalQueue(self, key, signal='q', db=None, wait=10, cursor=None):
+        """
+        Create a :py:class:`SignalQueue` instance.
+        """
+        return SignalQueue(self, key, signal, db, wait, cursor)
 
 
 class Cursor(object):

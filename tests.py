@@ -1130,8 +1130,8 @@ class TestLua(BaseLuaTestCase):
         self.assertEqual(L.queue_clear(queue='tq'), {'num': '5'})
 
     def test_queue_helper(self):
-        qa = LuaQueue(self.db, 'qa')
-        qb = LuaQueue(self.db, 'qb')
+        qa = self.db.Queue('qa')
+        qb = self.db.Queue('qb')
 
         for i in range(20):
             qa.add('i%s' % i)
@@ -1165,7 +1165,7 @@ class TestLua(BaseLuaTestCase):
         self.assertEqual(qa.pop(n=5), ['i4', 'i5', 'i6', 'i8', 'i9'])
 
     def test_queue_bpop(self):
-        qa = LuaQueue(self.db, 'qa')
+        qa = self.db.Queue('qa')
         qa.add('item')
         self.assertEqual(qa.bpop(), 'item')
         self.assertTrue(qa.bpop(timeout=0.1) is None)
@@ -1758,7 +1758,7 @@ class TestLuaSerializers(BaseTestCase):
         'server_args': ['-scr', lua_script]}
 
     def test_queue_pickle(self):
-        q = LuaQueue(self.db, 'queue')
+        q = self.db.Queue('queue')
         data = [{'item': 'i%s' % i} for i in range(3)]
         serialized = [pickle.dumps(item) for item in data]
         q.add(serialized[0])
