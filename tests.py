@@ -1789,7 +1789,7 @@ class TestLuaSerializers(BaseTestCase):
 
         next_key = self.db.match_prefix('qa\t')[0]
         raw_data = self.db.get_bytes(next_key)
-        self.assertEqual(raw_data, '{"key":"i4"}')
+        self.assertEqual(raw_data, b'{"key":"i4"}')
 
         self.assertEqual(q.pop(n=100), [
             {'key': 'i4'}, {'key': 'i5'}, {'key': 'i7'}])
