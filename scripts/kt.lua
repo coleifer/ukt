@@ -1028,14 +1028,11 @@ end
 -- returns: { k=v ... }
 function list(inmap, outmap)
   local db = _select_db(inmap) -- Allow db to be specified as argument.
-  local cur = db:cursor()
-  cur:jump()
-  while true do
-    local key, value, xt = cur:get(true)
-    if not key then break end
+  local function visit(key, value)
     outmap[key] = value
+    return kt.Visitor.NOP
   end
-  cur:disable()
+  db:iterate(visit, false)
   return kt.RVSUCCESS
 end
 
@@ -1746,6 +1743,9 @@ function expire_time(inmap, outmap)
   end
   return kt.RVSUCCESS
 end
+
+
+--
 
 
 -- Test error code handling.
