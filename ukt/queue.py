@@ -13,24 +13,32 @@ class LuaQueue(object):
         self._key = key
         self._db = client.default_db if db is None else db
 
-    def _lua(self, fn, **kwargs):
-        kwargs.update(queue=self._key, db=self._db)
-        return self.kt.script(fn, kwargs, encode_values=False,
-                              decode_values=False)
+    def _lua(self, fn, raw_data=None, value_data=None):
+        data = {'queue': self._key, 'db': self._db}
+        if raw_data is not None:
+            data.update(raw_data)
+
+        if value_data:
+            for key, value in value_data.items():
+                data[key] = self.kt.encode_value(value)
+
+        return self.kt.raw_script(fn, data)
 
     def add(self, item):
-        item = self.kt.encode_value(item)
-        return int(self._lua('queue_add', data=item)['id'])
+        return int(self._lua('queue_add', None, {'data': item})[b'id'])
 
     def extend(self, items):
-        args = {str(i): self.kt.encode_value(item)
-                for i, item in enumerate(items)}
-        return int(self._lua('queue_madd', **args)['num'])
+        value_data = {str(i): item for i, item in enumerate(items)}
+        return int(self._lua('queue_madd', None, value_data)[b'num'])
 
-    def _item_list(self, fn, n=1, **kwargs):
-        items = self._lua(fn, n=n, **kwargs)
+    def _item_list(self, fn, n=1, timeout=None, value_data=None):
+        raw_data = {'n': n}
+        if timeout is not None:
+            raw_data['timeout'] = timeout
+
+        items = self._lua(fn, raw_data, value_data)
         if n == 1:
-            return self.kt.decode_value(items['0']) if items else None
+            return self.kt.decode_value(items[b'0']) if items else None
 
         accum = []
         if items:
@@ -44,8 +52,7 @@ class LuaQueue(object):
         return self._item_list('queue_rpop', n)
 
     def bpop(self, timeout=None):
-        kwargs = {'timeout': str(timeout)} if timeout else {}
-        return self._item_list('queue_bpop', 1, **kwargs)
+        return self._item_list('queue_bpop', 1, timeout)
 
     def peek(self, n=1):
         return self._item_list('queue_peek', n)
@@ -53,22 +60,21 @@ class LuaQueue(object):
         return self._item_list('queue_rpeek', n)
 
     def count(self):
-        return int(self._lua('queue_size')['num'])
+        return int(self._lua('queue_size')[b'num'])
     __len__ = count
 
     def remove(self, data, n=None):
-        if n is None:
-            n = -1
-        data = self.kt.encode_value(data)
-        return int(self._lua('queue_remove', data=data, n=n)['num'])
+        if n is None: n = -1
+        value_data = {'data': data}
+        return int(self._lua('queue_remove', {'n': n}, value_data)[b'num'])
+
     def rremove(self, data, n=None):
-        if n is None:
-            n = -1
-        data = self.kt.encode_value(data)
-        return int(self._lua('queue_rremove', data=data, n=n)['num'])
+        if n is None: n = -1
+        value_data = {'data': data}
+        return int(self._lua('queue_rremove', {'n': n}, value_data)[b'num'])
 
     def clear(self):
-        return int(self._lua('queue_clear')['num'])
+        return int(self._lua('queue_clear')[b'num'])
 
 
 class SignalQueue(object):

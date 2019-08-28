@@ -1753,20 +1753,46 @@ class TestLuaContainersMultiDB(BaseLuaTestCase):
 class TestLuaSerializers(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server_kwargs = {
-        'serializer': KT_PICKLE,
+        'serializer': KT_JSON,
         'database': '%',
         'server_args': ['-scr', lua_script]}
 
     def test_queue_pickle(self):
         q = self.db.Queue('queue')
         data = [{'item': 'i%s' % i} for i in range(3)]
-        serialized = [pickle.dumps(item) for item in data]
-        q.add(serialized[0])
-        q.extend(serialized[1:])
+        q.add(data[0])
+        q.extend(data[1:])
 
-        self.assertEqual(pickle.loads(q.pop()), {'item': 'i0'})
-        vals = [pickle.loads(i) for i in q.rpop(2)]
-        self.assertEqual(vals, [{'item': 'i2'}, {'item': 'i1'}])
+        self.assertEqual(q.pop(), {'item': 'i0'})
+        self.assertEqual(q.rpop(2), [{'item': 'i2'}, {'item': 'i1'}])
+
+    def test_queue_helper(self):
+        q = self.db.Queue('qa')
+        q.add({'key': 'i0'})
+        q.extend([{'key': 'i%s' % i} for i in range(1, 10)])
+
+        self.assertEqual(q.pop(), {'key': 'i0'})
+        self.assertEqual(q.rpop(2), [{'key': 'i9'}, {'key': 'i8'}])
+
+        self.assertEqual(q.peek(n=2), [{'key': 'i1'}, {'key': 'i2'}])
+        self.assertEqual(q.rpeek(), {'key': 'i7'})
+
+        self.assertEqual(q.remove({'key': 'i2'}), 1)
+        self.assertEqual(q.remove({'key': 'i2'}), 0)
+        self.assertEqual(q.rremove({'key': 'i6'}), 1)
+        self.assertEqual(q.rremove({'key': 'i6'}), 0)
+
+        self.assertEqual(len(q), 5)
+
+        self.assertEqual(q.bpop(), {'key': 'i1'})
+        self.assertEqual(q.bpop(), {'key': 'i3'})
+
+        next_key = self.db.match_prefix('qa\t')[0]
+        raw_data = self.db.get_bytes(next_key)
+        self.assertEqual(raw_data, '{"key":"i4"}')
+
+        self.assertEqual(q.pop(n=100), [
+            {'key': 'i4'}, {'key': 'i5'}, {'key': 'i7'}])
 
 
 class TestLuaMultiDB(BaseTestCase):
