@@ -135,3 +135,37 @@ class SignalQueue(object):
     def flush(self):
         keys = self.client.match_prefix(self.key + ':')
         return self.client.remove_bulk(keys)
+
+
+class Schedule(object):
+    def __init__(self, client, key, db=None):
+        self.kt = client
+        self._key = key
+        self._db = client.default_db if db is None else db
+
+    def add(self, item, score=0):
+        data = {
+            'db': self._db,
+            'key': self._key,
+            'score': str(score),
+            'value': self.kt.encode_value(item)}
+        out = self.kt.raw_script('schedule_add', data)
+        return out[b'key']
+
+    def read(self, score=None, n=None):
+        data = {'db': self._db, 'key': self._key}
+        if score is not None:
+            data['score'] = str(score)
+        if n is not None:
+            data['n'] = str(n)
+        out = self.kt.raw_script('schedule_read', data)
+        return [self.kt.decode_value(out[key])
+                for key in sorted(out, key=int)]
+
+    def clear(self):
+        keys = self.kt.match_prefix(self._key, db=self._db)
+        return self.kt.remove_bulk(keys, db=self._db)
+
+    def count(self):
+        return len(self.kt.match_prefix(self._key + '\t', db=self._db))
+    __len__ = count

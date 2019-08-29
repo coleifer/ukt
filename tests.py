@@ -1795,6 +1795,42 @@ class TestLuaSerializers(BaseTestCase):
             {'key': 'i4'}, {'key': 'i5'}, {'key': 'i7'}])
 
 
+class TestLuaSchedule(BaseTestCase):
+    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
+    server_kwargs = {
+        'serializer': KT_PICKLE,
+        'database': '%',
+        'server_args': ['-scr', lua_script]}
+
+    def test_lua_schedule(self):
+        s = self.db.Schedule('sched')
+        nums = [100, 10, 1000, 1, 3, 5, 4, 20, 2]
+        for num in nums:
+            s.add('i%s' % num, num)
+        self.assertEqual(len(s), len(nums))
+
+        self.assertEqual(s.read(n=1), ['i1'])
+        self.assertEqual(s.read(4), ['i2', 'i3', 'i4'])
+        self.assertEqual(s.read(100, n=2), ['i5', 'i10'])
+        self.assertEqual(len(s), 3)
+        self.assertEqual(s.read(100, n=4), ['i20', 'i100'])
+        self.assertEqual(s.read(), ['i1000'])
+        self.assertEqual(len(s), 0)
+        self.assertEqual(s.clear(), 1)
+
+    def test_lua_samescore(self):
+        s = self.db.Schedule('sched')
+
+        for i in reversed(range(1, 4)):
+            s.add('ia-%s' % i, 1)
+            s.add('ib-%s' % i, 2)
+
+        self.assertEqual(s.read(n=2), ['ia-3', 'ia-2'])
+        self.assertEqual(s.read(n=2), ['ia-1', 'ib-3'])
+        self.assertEqual(s.read(1), [])
+        self.assertEqual(s.read(), ['ib-2', 'ib-1'])
+
+
 class TestLuaMultiDB(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '%']}

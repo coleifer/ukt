@@ -1745,7 +1745,90 @@ function expire_time(inmap, outmap)
 end
 
 
---
+-- Simple schedule implementation. Store timestamp + data (or any arbitrary
+-- numeric value), and retrieve rows less than the timestamp.
+
+-- Add item to schedule.
+-- accepts { key, score, value, db }
+-- returns { key }
+function schedule_add(inmap, outmap)
+  local db = _select_db(inmap)
+  if not inmap.key then
+    kt.log("system", "schedule_add() missing required 'key'")
+    return kt.RVEINVALID
+  elseif not inmap.value then
+    kt.log("system", "schedule_add() missing required 'value'")
+    return kt.RVEINVALID
+  end
+  local key = inmap.key
+  local score = tonumber(inmap.score) or 0
+
+  local next_id = db:increment_double(key, 1)
+  if not next_id then
+    kt.log("info", "unable to determine id when adding item to schedule!")
+    return kt.RVELOGIC
+  end
+  local score_id = kt.pack("MM", score, next_id)
+  local next_key = string.format("%s\t%s", key, score_id)
+  if not db:add(next_key, inmap.value) then
+    kt.log("system", "data for score/id '" .. score_id .. "' already exists.")
+    return kt.RVELOGIC
+  end
+  outmap.key = next_key
+  return kt.RVSUCCESS
+end
+
+
+-- Read (destructively) item(s) from the schedule.
+-- accepts { key, score, n, db }
+-- returns { 0: data0, 1: data1, ... }
+function schedule_read(inmap, outmap)
+  local db = _select_db(inmap)
+  if not inmap.key then
+    kt.log("system", "schedule_read() missing required 'key'")
+    return kt.RVEINVALID
+  end
+  local key = inmap.key
+  local max_score = tonumber(inmap.score) or 0xffffffff
+  local n = tonumber(inmap.n or '-1')
+
+  local cursor = db:cursor()
+  local start_key = string.format("%s\t", key)
+  local pattern = string.format("^%s\t", key)
+
+  if not cursor:jump(start_key) then
+    -- No data, we're done.
+    cursor:disable()
+    return kt.RVSUCCESS
+  end
+
+  local k, v, xt
+  local num = 0
+  local score_start = key:len() + 2  -- e.g. length + tab + 1.
+  local score_end = score_start + 7  -- read 8 bytes.
+
+  while n ~= 0 do
+    -- Retrieve the key, value and xt from the cursor. If the cursor is
+    -- invalidated then nil is returned.
+    k, v, xt = cursor:get(false)
+    if not k then break end
+
+    -- If this is not a queue item key, we are done.
+    if not k:match(pattern) then break end
+
+    -- Extract the score from the key. If it is higher than the score provided
+    -- by the caller, we are done.
+    local score = kt.unpack("M", k:sub(score_start, score_end))[1]
+    if score > max_score then break end
+
+    cursor:remove()  -- Implies step to the next record.
+    outmap[num] = v
+    num = num + 1
+    n = n - 1
+  end
+  cursor:disable()
+  return kt.RVSUCCESS
+end
 
 
 -- Test error code handling.
