@@ -1804,7 +1804,7 @@ function schedule_read(inmap, outmap)
 
   local k, v, xt
   local num = 0
-  local score_start = key:len() + 2  -- e.g. length + tab + 1.
+  local score_start = string.len(key) + 2  -- e.g. length + tab + 1.
   local score_end = score_start + 7  -- read 8 bytes.
 
   while n ~= 0 do
@@ -1818,7 +1818,7 @@ function schedule_read(inmap, outmap)
 
     -- Extract the score from the key. If it is higher than the score provided
     -- by the caller, we are done.
-    local score = kt.unpack("M", k:sub(score_start, score_end))[1]
+    local score = kt.unpack("M", string.sub(k, score_start, score_end))[1]
     if score > max_score then break end
 
     cursor:remove()  -- Implies step to the next record.
