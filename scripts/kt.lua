@@ -1768,8 +1768,8 @@ function schedule_add(inmap, outmap)
     kt.log("info", "unable to determine id when adding item to schedule!")
     return kt.RVELOGIC
   end
-  local score_id = kt.pack("MM", score, next_id)
-  local next_key = string.format("%s\t%s", key, score_id)
+  -- local score_id = kt.pack("MM", score, next_id)
+  local next_key = string.format("%s\t%012d%012d", key, score, next_id)
   if not db:add(next_key, inmap.value) then
     kt.log("system", "data for score/id '" .. score_id .. "' already exists.")
     return kt.RVELOGIC
@@ -1805,7 +1805,7 @@ function schedule_read(inmap, outmap)
   local k, v, xt
   local num = 0
   local score_start = string.len(key) + 2  -- e.g. length + tab + 1.
-  local score_end = score_start + 7  -- read 8 bytes.
+  local score_end = score_start + 11  -- read 12 bytes.
 
   while n ~= 0 do
     -- Retrieve the key, value and xt from the cursor. If the cursor is
@@ -1818,7 +1818,8 @@ function schedule_read(inmap, outmap)
 
     -- Extract the score from the key. If it is higher than the score provided
     -- by the caller, we are done.
-    local score = kt.unpack("M", string.sub(k, score_start, score_end))[1]
+    -- local score = kt.unpack("M", string.sub(k, score_start, score_end))[1]
+    local score = tonumber(string.sub(k, score_start, score_end))
     if score > max_score then break end
 
     cursor:remove()  -- Implies step to the next record.
