@@ -1887,6 +1887,6 @@ function jit_version(inmap, outmap)
 end
 
 if kt.thid == 0 then
-  local version = jit.version or "<not present>"
+  local version = jit and jit.version or "<not present>"
   kt.log("system", "luajit version: " .. version)
 end
