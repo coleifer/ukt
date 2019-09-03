@@ -34,7 +34,7 @@ class BaseTestCase(unittest.TestCase):
             warnings.filterwarnings(action='ignore', message='unclosed',
                                     category=ResourceWarning)
 
-        kwargs = {'quiet': True}
+        kwargs = {'quiet': False}
         if cls.server_kwargs:
             kwargs.update(cls.server_kwargs)
         cls._server = cls.server(**kwargs)
@@ -564,6 +564,192 @@ class TestSerializers(BaseTestCase):
 
         db.set('k3', [u'foo', b'bar'])
         self.assertEqual(db.get('k3'), [u'foo', b'bar'])
+
+
+class TestMultiDB(BaseTestCase):
+    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
+    server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '*']}
+
+    def tearDown(self):
+        super(TestMultiDB, self).tearDown()
+        self.db.clear(0)
+        self.db.clear(1)
+
+    def test_multiple_databases_present(self):
+        report = self.db.report()
+        self.assertTrue('db_0' in report)
+        self.assertTrue('db_1' in report)
+        self.assertTrue(report['db_0'].endswith(b'path=*'))
+        self.assertTrue(report['db_1'].endswith(b'path=%'))
+
+    def test_list_databases(self):
+        self.assertEqual(self.db.databases, ['*', '%'])
+
+        db_status = self.db.list_databases()
+        (hpath, hstatus), (tpath, tstatus) = db_status
+        self.assertEqual(hpath, '*')
+        self.assertEqual(hstatus['count'], 0)
+        self.assertEqual(tpath, '%')
+        self.assertEqual(tstatus['count'], 0)
+
+    def test_multiple_databases_lua(self):
+        db = KyotoTycoon(self._server.host, self._server.port,
+                         serializer=KT_NONE)
+
+        db.set_bulk({'k1': 'v1-0', 'k2': 'v2-0', 'k3': 'v3-0'}, db=0)
+        db.set_bulk({'k1': 'v1-1', 'k2': 'v2-1', 'k3': 'v3-1'}, db=1)
+
+        L = db.lua
+        self.assertEqual(L.list(), L.list(db=0, encode_values=False))
+        self.assertEqual(L.list(db=0, encode_values=False), {
+            'k1': b'v1-0',
+            'k2': b'v2-0',
+            'k3': b'v3-0'})
+        self.assertEqual(L.list(db=1, encode_values=False), {
+            'k1': b'v1-1',
+            'k2': b'v2-1',
+            'k3': b'v3-1'})
+
+    def test_multiple_databases(self):
+        k0 = KyotoTycoon(self._server.host, self._server.port, default_db=0)
+        k1 = KyotoTycoon(self._server.host, self._server.port, default_db=1)
+
+        k0.set('k1', 'v1-0')
+        k0.set('k2', 'v2-0')
+        self.assertEqual(len(k0), 2)
+        self.assertEqual(len(k1), 0)
+
+        k1.set('k1', 'v1-1')
+        k1.set('k2', 'v2-1')
+        self.assertEqual(len(k0), 2)
+        self.assertEqual(len(k1), 2)
+
+        self.assertEqual(k0.get('k1'), 'v1-0')
+        k0.remove('k1')
+        self.assertTrue(k0.get('k1') is None)
+
+        self.assertEqual(k1.get('k1'), 'v1-1')
+        k1.remove('k1')
+        self.assertTrue(k1.get('k1') is None)
+
+        k0.set_bulk({'k1': 'v1-0', 'k3': 'v3-0'})
+        k1.set_bulk({'k1': 'v1-1', 'k3': 'v3-1'})
+
+        self.assertEqual(k0.get_bulk(['k1', 'k2', 'k3']),
+                         {'k1': 'v1-0', 'k2': 'v2-0', 'k3': 'v3-0'})
+        self.assertEqual(k1.get_bulk(['k1', 'k2', 'k3']),
+                         {'k1': 'v1-1', 'k2': 'v2-1', 'k3': 'v3-1'})
+
+        self.assertEqual(k0.remove_bulk(['k3', 'k2']), 2)
+        self.assertEqual(k0.remove_bulk(['k3', 'k2']), 0)
+        self.assertEqual(k1.remove_bulk(['k3', 'k2']), 2)
+        self.assertEqual(k1.remove_bulk(['k3', 'k2']), 0)
+
+        self.assertTrue(k0.add('k2', 'v2-0'))
+        self.assertFalse(k0.add('k2', 'v2-x'))
+
+        self.assertTrue(k1.add('k2', 'v2-1'))
+        self.assertFalse(k1.add('k2', 'v2-x'))
+
+        self.assertEqual(k0['k2'], 'v2-0')
+        self.assertEqual(k1['k2'], 'v2-1')
+
+        self.assertTrue(k0.replace('k2', 'v2-0x'))
+        self.assertFalse(k0.replace('k3', 'v3-0'))
+        self.assertTrue(k1.replace('k2', 'v2-1x'))
+        self.assertFalse(k1.replace('k3', 'v3-1'))
+
+        self.assertEqual(k0['k2'], 'v2-0x')
+        self.assertEqual(k1['k2'], 'v2-1x')
+
+        self.assertTrue(k0.append('k3', 'v3-0'))
+        self.assertTrue(k0.append('k3', 'x'))
+        self.assertTrue(k1.append('k3', 'v3-1'))
+        self.assertTrue(k1.append('k3', 'x'))
+
+        self.assertEqual(k0['k3'], 'v3-0x')
+        self.assertEqual(k1['k3'], 'v3-1x')
+
+        for k in (k0, k1):
+            self.assertTrue(k.exists('k3'))
+            self.assertEqual(k.length('k3'), 5)
+            self.assertEqual(k.remove('k3'), 1)
+            self.assertFalse(k.exists('k3'))
+
+        self.assertEqual(k0.seize('k2'), 'v2-0x')
+        self.assertEqual(k1.seize('k2'), 'v2-1x')
+
+        self.assertTrue(k0.cas('k1', 'v1-0', 'v1-0x'))
+        self.assertFalse(k0.cas('k1', 'v1-0', 'v1-0z'))
+
+        self.assertTrue(k1.cas('k1', 'v1-1', 'v1-1x'))
+        self.assertFalse(k1.cas('k1', 'v1-1', 'v1-1z'))
+
+        self.assertEqual(k0['k1'], 'v1-0x')
+        self.assertEqual(k1['k1'], 'v1-1x')
+
+        for k in (k0, k1):
+            k.remove_bulk(['i', 'j'])
+            self.assertEqual(k.increment('i'), 1)
+            self.assertEqual(k.increment('i'), 2)
+
+            self.assertEqual(k.increment_double('j'), 1.)
+            self.assertEqual(k.increment_double('j'), 2.)
+
+        self.assertEqual(k0['k1'], 'v1-0x')
+        self.assertEqual(k0['k1', 1], 'v1-1x')
+        self.assertEqual(k1['k1'], 'v1-1x')
+        self.assertEqual(k1['k1', 0], 'v1-0x')
+
+        k0['k2'] = 'v2-0y'
+        k0['k2', 1] = 'v2-1y'
+        self.assertEqual(k0.get('k2'), 'v2-0y')
+        self.assertEqual(k1.get('k2'), 'v2-1y')
+        k1['k2'] = 'v2-1z'
+        k1['k2', 0] = 'v2-0z'
+        self.assertEqual(k0.get('k2'), 'v2-0z')
+        self.assertEqual(k1.get('k2'), 'v2-1z')
+
+        del k0['k1']
+        del k0['k1', 1]
+        self.assertTrue(k0['k1'] is None)
+        self.assertTrue(k1['k1'] is None)
+        del k1['k2']
+        del k1['k2', 0]
+        self.assertTrue(k0['k2'] is None)
+        self.assertTrue(k1['k2'] is None)
+
+        k0['k3'] = 'v3-0'
+        k0['k03'] = 'v03'
+        k1['k3'] = 'v3-1'
+        k1['k13'] = 'v13'
+        self.assertTrue('k3' in k0)
+        self.assertTrue('k03' in k0)
+        self.assertTrue('k13' not in k0)
+        self.assertTrue('k3' in k1)
+        self.assertTrue('k13' in k1)
+        self.assertTrue('k03' not in k1)
+
+        self.assertEqual(sorted(k0.match_prefix('k')), ['k03', 'k3'])
+        self.assertEqual(sorted(k0.match_prefix('k', db=1)), ['k13', 'k3'])
+        self.assertEqual(sorted(k1.match_prefix('k')), ['k13', 'k3'])
+        self.assertEqual(sorted(k1.match_prefix('k', db=0)), ['k03', 'k3'])
+
+        self.assertEqual(sorted(k0.match_regex('k')), ['k03', 'k3'])
+        self.assertEqual(sorted(k0.match_regex('k', db=1)), ['k13', 'k3'])
+        self.assertEqual(sorted(k1.match_regex('k')), ['k13', 'k3'])
+        self.assertEqual(sorted(k1.match_regex('k', db=0)), ['k03', 'k3'])
+
+        self.assertEqual(sorted(k0.keys()), ['i', 'j', 'k03', 'k3'])
+        self.assertEqual(sorted(k0.keys(1)), ['i', 'j', 'k13', 'k3'])
+        self.assertEqual(sorted(k1.keys()), ['i', 'j', 'k13', 'k3'])
+        self.assertEqual(sorted(k1.keys(0)), ['i', 'j', 'k03', 'k3'])
+
+        k0.clear()
+        self.assertTrue('k3' not in k0)
+        self.assertTrue('k3' in k1)
+        k1.clear()
+        self.assertTrue('k3' not in k1)
 
 
 class BaseLuaTestCase(BaseTestCase):
@@ -1129,73 +1315,6 @@ class TestLua(BaseLuaTestCase):
             '0': 'i0', '1': 'i1', '2': 'i2', '3': 'i2', '4': 'i2'})
         self.assertEqual(L.queue_clear(queue='tq'), {'num': '5'})
 
-    def test_queue_helper(self):
-        qa = self.db.Queue('qa')
-        qb = self.db.Queue('qb')
-
-        for i in range(20):
-            qa.add('i%s' % i)
-            qb.add('i%s' % (i % 4))
-
-        self.assertEqual(len(qa), 20)
-        self.assertEqual(len(qb), 20)
-
-        self.assertEqual(qa.pop(), 'i0')
-        self.assertEqual(qa.rpop(), 'i19')
-        self.assertEqual(qa.pop(n=3), ['i1', 'i2', 'i3'])
-        self.assertEqual(qa.rpop(n=3), ['i18', 'i17', 'i16'])
-        self.assertEqual(qa.peek(n=3), ['i4', 'i5', 'i6'])
-        self.assertEqual(qa.rpeek(n=3), ['i15', 'i14', 'i13'])
-
-        # i0, i1, i2, i3 ... x5.
-        self.assertEqual(qb.remove('i1', n=4), 4)
-        self.assertEqual(qb.rremove('i2', n=4), 4)
-        self.assertEqual(len(qb), 12)
-        self.assertEqual(qb.peek(20), ['i0', 'i2', 'i3', 'i0', 'i3',
-                                       'i0', 'i3', 'i0', 'i3', 'i0',
-                                       'i1', 'i3'])
-        self.assertEqual(qb.remove('i3', n=5), 5)
-        self.assertEqual(qb.remove('i0', n=10), 5)
-        self.assertEqual(qb.bpop(), 'i2')
-        self.assertEqual(qb.bpop(), 'i1')
-        self.assertEqual(len(qb), 0)
-
-        self.assertEqual(qa.remove('i7'), 1)
-        self.assertEqual(qa.remove('i7'), 0)
-        self.assertEqual(qa.pop(n=5), ['i4', 'i5', 'i6', 'i8', 'i9'])
-
-    def test_queue_bpop(self):
-        qa = self.db.Queue('qa')
-        qa.add('item')
-        self.assertEqual(qa.bpop(), 'item')
-        self.assertTrue(qa.bpop(timeout=0.1) is None)
-
-    def test_hexastore(self):
-        L = self.db.lua
-        data = (
-            ('charlie', 'likes', 'zaizee'),
-            ('charlie', 'likes', 'huey'),
-            ('charlie', 'likes', 'mickey'),
-            ('huey', 'likes', 'zaizee'),
-            ('zaizee', 'likes', 'huey'),
-        )
-        for s, p, o in data:
-            L.hx_add(s=s, p=p, o=o)
-
-        self.assertEqual(self.db.count(), 15)  # 5 * 3.
-        data = L.hx_query(s='charlie', p='likes')
-        self.assertEqual(data, {'o0': 'huey', 'o1': 'mickey', 'o2': 'zaizee'})
-
-        L.hx_remove(s='charlie', p='likes', o='mickey')
-        data = L.hx_query(s='charlie', p='likes')
-        self.assertEqual(data, {'o0': 'huey', 'o1': 'zaizee'})
-
-        data = L.hx_query(o='zaizee')
-        self.assertEqual(data, {
-            's0': 'charlie', 'p0': 'likes',
-            's1': 'huey', 'p1': 'likes'})
-        self.db.clear()
-
     def test_python_list_integration(self):
         L = self.db.lua
         data = ['foo', 'a' * 1024, '', 'b' * 1024 * 32, 'c']
@@ -1250,6 +1369,75 @@ class TestLua(BaseLuaTestCase):
         self.assertEqual(self.db.deserialize_dict(db2.get('h2')),
                          {'k1': 'v1', 'k3': 'v3'})
         db2.close_all()
+
+
+class TestLuaMultiDB(BaseTestCase):
+    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
+    server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '%']}
+
+    def test_script_multi_db(self):
+        self.db.clear(db=0)
+        self.db.clear(db=1)
+
+        for i in range(3):
+            self.db.set('k%s' % i, 'v%s' % i, db=(i % 2))
+
+        self.assertEqual(self.db.lua.list(), {'k0': 'v0', 'k2': 'v2'})
+        self.assertEqual(self.db.lua.list(db=0), {'k0': 'v0', 'k2': 'v2'})
+        self.assertEqual(self.db.lua.list(db=1), {'k1': 'v1'})
+
+    def test_script_datatypes_multi_db(self):
+        L = self.db.lua
+
+        # Test sets with multiple dbs.
+        for i in range(5):
+            kwargs = {str(i): 'v%s' % i, 'db': i % 2}
+            L.sadd(key='s1', **kwargs)
+
+        self.assertEqual(L.scard(key='s1', db=0), {'num': '3'})
+        self.assertEqual(L.scard(key='s1', db=1), {'num': '2'})
+
+        # By default the database is 0.
+        self.assertEqual(sorted(L.smembers(key='s1').values()),
+                         ['v0', 'v2', 'v4'])
+        self.assertEqual(sorted(L.smembers(key='s1', db=0).values()),
+                         ['v0', 'v2', 'v4'])
+        self.assertEqual(sorted(L.smembers(key='s1', db=1).values()),
+                         ['v1', 'v3'])
+
+        self.assertEqual(L.sismember(key='s1', value='v2', db=0), {'num': '1'})
+        self.assertEqual(L.sismember(key='s1', value='v2', db=1), {'num': '0'})
+        self.assertEqual(L.sismember(key='s1', value='v1', db=0), {'num': '0'})
+        self.assertEqual(L.sismember(key='s1', value='v1', db=1), {'num': '1'})
+
+        self.assertTrue(L.spop(key='s1')['value'] in ['v0', 'v2', 'v4'])
+        self.assertTrue(L.spop(key='s1', db=1)['value'] in ['v1', 'v3'])
+
+        # Test hashes with multiple dbs.
+        L.hmset(table_key='h1', k1='v1', k2='v2', db=0)
+        L.hmset(table_key='h1', k1='v1x', k2='v2x', db=1)
+
+        L.hset(table_key='h1', key='k1', value='v1z', db=0)
+        L.hset(table_key='h1', key='k1', value='v1y', db=1)
+
+        self.assertEqual(L.hgetall(table_key='h1'), {'k1': 'v1z', 'k2': 'v2'})
+        self.assertEqual(L.hgetall(table_key='h1', db=0),
+                         {'k1': 'v1z', 'k2': 'v2'})
+        self.assertEqual(L.hgetall(table_key='h1', db=1),
+                         {'k1': 'v1y', 'k2': 'v2x'})
+
+        # Test lists with multiple dbs.
+        for i in range(5):
+            L.llpush(key='l1', value='i%s' % i, db=(i % 2))
+
+        self.assertEqual(L.llen(key='l1')['num'], '3')
+        self.assertEqual(L.llen(key='l1', db=0)['num'], '3')
+        self.assertEqual(L.llen(key='l1', db=1)['num'], '2')
+
+        self.assertEqual(L.llpop(key='l1')['value'], 'i4')
+        self.assertEqual(L.lrpop(key='l1', db=0)['value'], 'i0')
+        self.assertEqual(L.llpop(key='l1', db=1)['value'], 'i3')
+        self.assertEqual(L.lrpop(key='l1', db=1)['value'], 'i1')
 
 
 class TestLuaContainers(BaseLuaTestCase):
@@ -1750,6 +1938,197 @@ class TestLuaContainersMultiDB(BaseLuaTestCase):
             self.assertTrue(self.db.exists(key, db=1))
 
 
+class TestLuaHexastore(BaseLuaTestCase):
+    def test_hexastore(self):
+        L = self.db.lua
+        data = (
+            ('charlie', 'likes', 'zaizee'),
+            ('charlie', 'likes', 'huey'),
+            ('charlie', 'likes', 'mickey'),
+            ('huey', 'likes', 'zaizee'),
+            ('zaizee', 'likes', 'huey'),
+        )
+        for s, p, o in data:
+            L.hx_add(s=s, p=p, o=o)
+
+        self.assertEqual(self.db.count(), 15)  # 5 * 3.
+        data = L.hx_query(s='charlie', p='likes')
+        self.assertEqual(data, {'o0': 'huey', 'o1': 'mickey', 'o2': 'zaizee'})
+
+        L.hx_remove(s='charlie', p='likes', o='mickey')
+        data = L.hx_query(s='charlie', p='likes')
+        self.assertEqual(data, {'o0': 'huey', 'o1': 'zaizee'})
+
+        data = L.hx_query(o='zaizee')
+        self.assertEqual(data, {
+            's0': 'charlie', 'p0': 'likes',
+            's1': 'huey', 'p1': 'likes'})
+        self.db.clear()
+
+
+class TestLuaQueue(BaseLuaTestCase):
+    def test_queue(self):
+        qa = self.db.Queue('qa')
+        qb = self.db.Queue('qb')
+
+        for i in range(20):
+            qa.add('i%s' % i)
+            qb.add('i%s' % (i % 4))
+
+        self.assertEqual(len(qa), 20)
+        self.assertEqual(len(qb), 20)
+
+        self.assertEqual(qa.pop(), 'i0')
+        self.assertEqual(qa.rpop(), 'i19')
+        self.assertEqual(qa.pop(n=3), ['i1', 'i2', 'i3'])
+        self.assertEqual(qa.rpop(n=3), ['i18', 'i17', 'i16'])
+        self.assertEqual(qa.peek(n=3), ['i4', 'i5', 'i6'])
+        self.assertEqual(qa.rpeek(n=3), ['i15', 'i14', 'i13'])
+
+        # i0, i1, i2, i3 ... x5.
+        self.assertEqual(qb.remove('i1', n=4), 4)
+        self.assertEqual(qb.rremove('i2', n=4), 4)
+        self.assertEqual(len(qb), 12)
+        self.assertEqual(qb.peek(20), ['i0', 'i2', 'i3', 'i0', 'i3',
+                                       'i0', 'i3', 'i0', 'i3', 'i0',
+                                       'i1', 'i3'])
+        self.assertEqual(qb.remove('i3', n=5), 5)
+        self.assertEqual(qb.remove('i0', n=10), 5)
+        self.assertEqual(qb.bpop(), 'i2')
+        self.assertEqual(qb.bpop(), 'i1')
+        self.assertEqual(len(qb), 0)
+
+        self.assertEqual(qa.remove('i7'), 1)
+        self.assertEqual(qa.remove('i7'), 0)
+        self.assertEqual(qa.pop(n=5), ['i4', 'i5', 'i6', 'i8', 'i9'])
+
+    def test_queue_bpop(self):
+        qa = self.db.Queue('qa')
+        qa.add('item')
+        self.assertEqual(qa.bpop(), 'item')
+        self.assertTrue(qa.bpop(timeout=0.1) is None)
+
+    def test_queue_score_sorting(self):
+        # See also TestLuaScheduler.test_lua_schedule.
+        q = self.db.Queue('q')
+
+        scores = [100, 10, 1000, 1, 0,
+                  3,  -10, 5,    4, 2]
+        for score in scores:
+            q.add('i%s' % score, score)
+
+        self.assertEqual(len(q), len(scores))
+
+        # Sorted by score (priority), descending.
+        self.assertEqual(q.peek(n=len(scores)), [
+            'i1000', 'i100', 'i10', 'i5', 'i4',
+            'i3', 'i2', 'i1', 'i0', 'i-10'])
+        self.assertEqual(q.peek(), 'i1000')
+        self.assertTrue(q.peek(min_score=1001) is None)
+
+        self.assertEqual(q.pop(4, min_score=10), ['i1000', 'i100', 'i10'])
+        self.assertEqual(q.pop(2, min_score=10), [])
+        self.assertEqual(q.bpop(), 'i5')
+        self.assertEqual(q.bpop(min_score=3), 'i4')
+
+        self.assertEqual(q.rpeek(3), ['i-10', 'i0', 'i1'])
+        self.assertEqual(q.rpeek(2, min_score=0), ['i0', 'i1'])
+        self.assertEqual(q.rpop(2, min_score=1), ['i1', 'i2'])
+
+        self.assertEqual(len(q), 3)
+        self.assertEqual(q.peek(4), ['i3', 'i0', 'i-10'])
+        self.assertEqual(q.peek(4, min_score=0), ['i3', 'i0'])
+        self.assertEqual(q.peek(4, min_score=-9), ['i3', 'i0'])
+
+        self.assertEqual(q.pop(2, min_score=0), ['i3', 'i0'])
+        self.assertEqual(q.peek(), q.rpeek())
+        self.assertEqual(q.pop(), 'i-10')
+        self.assertEqual(len(q), 0)
+
+    def test_mix_score_default(self):
+        # Test no explicit score defaults to zero.
+        q = self.db.Queue('q')
+        q.add('ix')
+        q.add('iy')
+        q.add('iz', 1)
+        self.assertTrue(q.peek(), 'iz')
+        self.assertTrue(q.rpeek(), 'iy')
+        self.assertEqual(len(q), 3)
+        self.assertEqual(q.peek(10), ['iz', 'ix', 'iy'])
+        self.assertEqual(q.peek(10, 1), ['iz'])
+
+        self.assertEqual(q.pop(), 'iz')
+        self.assertEqual(q.rpop(), 'iy')
+
+        self.assertTrue(q.peek() == q.rpeek() == 'ix')
+        self.assertTrue(q.peek(min_score=1) is None)
+        self.assertTrue(q.rpeek(min_score=1) is None)
+        self.assertEqual(q.remove('ix', min_score=1), 0)
+        self.assertEqual(len(q), 1)
+        self.assertEqual(q.remove('ix', min_score=-1), 1)
+        self.assertEqual(len(q), 0)
+
+    def test_queue_remove_score(self):
+        # Test no explicit score defaults to zero, and test remove() with a
+        # minimum score.
+        q = self.db.Queue('q')
+        q.add('x')
+        q.add('x', 3)
+        q.extend(['y', 'x', 'z'])
+        q.extend(['y', 'z'], 2)
+        q.add('y', 2)
+        q.add('z', 1)
+
+        # x(3), y(2), z(2), y(2), z(1), x(0), y(0), x(0), z(0)
+        self.assertEqual(len(q), 9)
+        self.assertEqual(q.peek(9), ['x', 'y', 'z', 'y', 'z',
+                                     'x', 'y', 'x', 'z'])
+
+        self.assertEqual(q.remove('x', n=2, min_score=3), 1)
+        self.assertEqual(q.rremove('y', n=1, min_score=1), 1)
+        self.assertEqual(q.rremove('z', n=2, min_score=0), 2)
+
+        # y(2), z(2), x(0), y(0), x(0).
+        self.assertEqual(len(q), 5)
+        self.assertEqual(q.peek(5), ['y', 'z', 'x', 'y', 'x'])
+
+        self.assertEqual(q.rremove('x', min_score=-1), 2)
+        self.assertEqual(q.rremove('y', min_score=1), 1)
+
+        # z(2), y(0).
+        self.assertEqual(len(q), 2)
+        self.assertEqual(q.peek(2), ['z', 'y'])
+
+        # Ordinary remove works fine regardless of score.
+        self.assertEqual(q.remove('z'), 1)
+        self.assertEqual(q.remove('y'), 1)
+
+    def test_queue_set_priority(self):
+        q = self.db.Queue('q')
+
+        # Add 3 items with priority=0.
+        q.extend(['i0', 'i1', 'i2'])
+        self.assertEqual(q.peek(3), ['i0', 'i1', 'i2'])
+        self.assertEqual(q.rpeek(3), ['i2', 'i1', 'i0'])
+
+        self.assertEqual(q.set_priority('i1', 1), 1)
+        self.assertEqual(len(q), 3)
+        self.assertEqual(q.peek(3), ['i1', 'i0', 'i2'])
+
+        self.assertEqual(q.set_priority('i2', 2), 1)
+        self.assertEqual(q.set_priority('i2', 2), 0)
+        self.assertEqual(q.set_priority('i0', 0), 0)
+        self.assertEqual(q.set_priority('i0', -1), 1)
+        self.assertEqual(len(q), 3)
+        self.assertEqual(q.peek(3), ['i2', 'i1', 'i0'])
+        self.assertEqual(q.rpeek(3), ['i0', 'i1', 'i2'])
+
+        self.assertEqual(q.peek(3, 0), ['i2', 'i1'])
+        self.assertEqual(q.rpeek(3, 0), ['i1', 'i2'])
+        self.assertEqual(q.peek(3, 2), ['i2'])
+        self.assertEqual(q.rpeek(3, 2), ['i2'])
+
+
 class TestLuaSerializers(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
     server_kwargs = {
@@ -1758,15 +2137,6 @@ class TestLuaSerializers(BaseTestCase):
         'server_args': ['-scr', lua_script]}
 
     def test_queue_pickle(self):
-        q = self.db.Queue('queue')
-        data = [{'item': 'i%s' % i} for i in range(3)]
-        q.add(data[0])
-        q.extend(data[1:])
-
-        self.assertEqual(q.pop(), {'item': 'i0'})
-        self.assertEqual(q.rpop(2), [{'item': 'i2'}, {'item': 'i1'}])
-
-    def test_queue_helper(self):
         q = self.db.Queue('qa')
         q.add({'key': 'i0'})
         q.extend([{'key': 'i%s' % i} for i in range(1, 10)])
@@ -1829,261 +2199,6 @@ class TestLuaSchedule(BaseTestCase):
         self.assertEqual(s.read(n=2), ['ia-1', 'ib-3'])
         self.assertEqual(s.read(1), [])
         self.assertEqual(s.read(), ['ib-2', 'ib-1'])
-
-
-class TestLuaMultiDB(BaseTestCase):
-    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
-    server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '%']}
-
-    def test_script_multi_db(self):
-        self.db.clear(db=0)
-        self.db.clear(db=1)
-
-        for i in range(3):
-            self.db.set('k%s' % i, 'v%s' % i, db=(i % 2))
-
-        self.assertEqual(self.db.lua.list(), {'k0': 'v0', 'k2': 'v2'})
-        self.assertEqual(self.db.lua.list(db=0), {'k0': 'v0', 'k2': 'v2'})
-        self.assertEqual(self.db.lua.list(db=1), {'k1': 'v1'})
-
-    def test_script_datatypes_multi_db(self):
-        L = self.db.lua
-
-        # Test sets with multiple dbs.
-        for i in range(5):
-            kwargs = {str(i): 'v%s' % i, 'db': i % 2}
-            L.sadd(key='s1', **kwargs)
-
-        self.assertEqual(L.scard(key='s1', db=0), {'num': '3'})
-        self.assertEqual(L.scard(key='s1', db=1), {'num': '2'})
-
-        # By default the database is 0.
-        self.assertEqual(sorted(L.smembers(key='s1').values()),
-                         ['v0', 'v2', 'v4'])
-        self.assertEqual(sorted(L.smembers(key='s1', db=0).values()),
-                         ['v0', 'v2', 'v4'])
-        self.assertEqual(sorted(L.smembers(key='s1', db=1).values()),
-                         ['v1', 'v3'])
-
-        self.assertEqual(L.sismember(key='s1', value='v2', db=0), {'num': '1'})
-        self.assertEqual(L.sismember(key='s1', value='v2', db=1), {'num': '0'})
-        self.assertEqual(L.sismember(key='s1', value='v1', db=0), {'num': '0'})
-        self.assertEqual(L.sismember(key='s1', value='v1', db=1), {'num': '1'})
-
-        self.assertTrue(L.spop(key='s1')['value'] in ['v0', 'v2', 'v4'])
-        self.assertTrue(L.spop(key='s1', db=1)['value'] in ['v1', 'v3'])
-
-        # Test hashes with multiple dbs.
-        L.hmset(table_key='h1', k1='v1', k2='v2', db=0)
-        L.hmset(table_key='h1', k1='v1x', k2='v2x', db=1)
-
-        L.hset(table_key='h1', key='k1', value='v1z', db=0)
-        L.hset(table_key='h1', key='k1', value='v1y', db=1)
-
-        self.assertEqual(L.hgetall(table_key='h1'), {'k1': 'v1z', 'k2': 'v2'})
-        self.assertEqual(L.hgetall(table_key='h1', db=0),
-                         {'k1': 'v1z', 'k2': 'v2'})
-        self.assertEqual(L.hgetall(table_key='h1', db=1),
-                         {'k1': 'v1y', 'k2': 'v2x'})
-
-        # Test lists with multiple dbs.
-        for i in range(5):
-            L.llpush(key='l1', value='i%s' % i, db=(i % 2))
-
-        self.assertEqual(L.llen(key='l1')['num'], '3')
-        self.assertEqual(L.llen(key='l1', db=0)['num'], '3')
-        self.assertEqual(L.llen(key='l1', db=1)['num'], '2')
-
-        self.assertEqual(L.llpop(key='l1')['value'], 'i4')
-        self.assertEqual(L.lrpop(key='l1', db=0)['value'], 'i0')
-        self.assertEqual(L.llpop(key='l1', db=1)['value'], 'i3')
-        self.assertEqual(L.lrpop(key='l1', db=1)['value'], 'i1')
-
-
-class TestMultiDB(BaseTestCase):
-    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
-    server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script, '*']}
-
-    def tearDown(self):
-        super(TestMultiDB, self).tearDown()
-        self.db.clear(0)
-        self.db.clear(1)
-
-    def test_multiple_databases_present(self):
-        report = self.db.report()
-        self.assertTrue('db_0' in report)
-        self.assertTrue('db_1' in report)
-        self.assertTrue(report['db_0'].endswith(b'path=*'))
-        self.assertTrue(report['db_1'].endswith(b'path=%'))
-
-    def test_list_databases(self):
-        self.assertEqual(self.db.databases, ['*', '%'])
-
-        db_status = self.db.list_databases()
-        (hpath, hstatus), (tpath, tstatus) = db_status
-        self.assertEqual(hpath, '*')
-        self.assertEqual(hstatus['count'], 0)
-        self.assertEqual(tpath, '%')
-        self.assertEqual(tstatus['count'], 0)
-
-    def test_multiple_databases_lua(self):
-        db = KyotoTycoon(self._server.host, self._server.port,
-                         serializer=KT_NONE)
-
-        db.set_bulk({'k1': 'v1-0', 'k2': 'v2-0', 'k3': 'v3-0'}, db=0)
-        db.set_bulk({'k1': 'v1-1', 'k2': 'v2-1', 'k3': 'v3-1'}, db=1)
-
-        L = db.lua
-        self.assertEqual(L.list(), L.list(db=0, encode_values=False))
-        self.assertEqual(L.list(db=0, encode_values=False), {
-            'k1': b'v1-0',
-            'k2': b'v2-0',
-            'k3': b'v3-0'})
-        self.assertEqual(L.list(db=1, encode_values=False), {
-            'k1': b'v1-1',
-            'k2': b'v2-1',
-            'k3': b'v3-1'})
-
-    def test_multiple_databases(self):
-        k0 = KyotoTycoon(self._server.host, self._server.port, default_db=0)
-        k1 = KyotoTycoon(self._server.host, self._server.port, default_db=1)
-
-        k0.set('k1', 'v1-0')
-        k0.set('k2', 'v2-0')
-        self.assertEqual(len(k0), 2)
-        self.assertEqual(len(k1), 0)
-
-        k1.set('k1', 'v1-1')
-        k1.set('k2', 'v2-1')
-        self.assertEqual(len(k0), 2)
-        self.assertEqual(len(k1), 2)
-
-        self.assertEqual(k0.get('k1'), 'v1-0')
-        k0.remove('k1')
-        self.assertTrue(k0.get('k1') is None)
-
-        self.assertEqual(k1.get('k1'), 'v1-1')
-        k1.remove('k1')
-        self.assertTrue(k1.get('k1') is None)
-
-        k0.set_bulk({'k1': 'v1-0', 'k3': 'v3-0'})
-        k1.set_bulk({'k1': 'v1-1', 'k3': 'v3-1'})
-
-        self.assertEqual(k0.get_bulk(['k1', 'k2', 'k3']),
-                         {'k1': 'v1-0', 'k2': 'v2-0', 'k3': 'v3-0'})
-        self.assertEqual(k1.get_bulk(['k1', 'k2', 'k3']),
-                         {'k1': 'v1-1', 'k2': 'v2-1', 'k3': 'v3-1'})
-
-        self.assertEqual(k0.remove_bulk(['k3', 'k2']), 2)
-        self.assertEqual(k0.remove_bulk(['k3', 'k2']), 0)
-        self.assertEqual(k1.remove_bulk(['k3', 'k2']), 2)
-        self.assertEqual(k1.remove_bulk(['k3', 'k2']), 0)
-
-        self.assertTrue(k0.add('k2', 'v2-0'))
-        self.assertFalse(k0.add('k2', 'v2-x'))
-
-        self.assertTrue(k1.add('k2', 'v2-1'))
-        self.assertFalse(k1.add('k2', 'v2-x'))
-
-        self.assertEqual(k0['k2'], 'v2-0')
-        self.assertEqual(k1['k2'], 'v2-1')
-
-        self.assertTrue(k0.replace('k2', 'v2-0x'))
-        self.assertFalse(k0.replace('k3', 'v3-0'))
-        self.assertTrue(k1.replace('k2', 'v2-1x'))
-        self.assertFalse(k1.replace('k3', 'v3-1'))
-
-        self.assertEqual(k0['k2'], 'v2-0x')
-        self.assertEqual(k1['k2'], 'v2-1x')
-
-        self.assertTrue(k0.append('k3', 'v3-0'))
-        self.assertTrue(k0.append('k3', 'x'))
-        self.assertTrue(k1.append('k3', 'v3-1'))
-        self.assertTrue(k1.append('k3', 'x'))
-
-        self.assertEqual(k0['k3'], 'v3-0x')
-        self.assertEqual(k1['k3'], 'v3-1x')
-
-        for k in (k0, k1):
-            self.assertTrue(k.exists('k3'))
-            self.assertEqual(k.length('k3'), 5)
-            self.assertEqual(k.remove('k3'), 1)
-            self.assertFalse(k.exists('k3'))
-
-        self.assertEqual(k0.seize('k2'), 'v2-0x')
-        self.assertEqual(k1.seize('k2'), 'v2-1x')
-
-        self.assertTrue(k0.cas('k1', 'v1-0', 'v1-0x'))
-        self.assertFalse(k0.cas('k1', 'v1-0', 'v1-0z'))
-
-        self.assertTrue(k1.cas('k1', 'v1-1', 'v1-1x'))
-        self.assertFalse(k1.cas('k1', 'v1-1', 'v1-1z'))
-
-        self.assertEqual(k0['k1'], 'v1-0x')
-        self.assertEqual(k1['k1'], 'v1-1x')
-
-        for k in (k0, k1):
-            k.remove_bulk(['i', 'j'])
-            self.assertEqual(k.increment('i'), 1)
-            self.assertEqual(k.increment('i'), 2)
-
-            self.assertEqual(k.increment_double('j'), 1.)
-            self.assertEqual(k.increment_double('j'), 2.)
-
-        self.assertEqual(k0['k1'], 'v1-0x')
-        self.assertEqual(k0['k1', 1], 'v1-1x')
-        self.assertEqual(k1['k1'], 'v1-1x')
-        self.assertEqual(k1['k1', 0], 'v1-0x')
-
-        k0['k2'] = 'v2-0y'
-        k0['k2', 1] = 'v2-1y'
-        self.assertEqual(k0.get('k2'), 'v2-0y')
-        self.assertEqual(k1.get('k2'), 'v2-1y')
-        k1['k2'] = 'v2-1z'
-        k1['k2', 0] = 'v2-0z'
-        self.assertEqual(k0.get('k2'), 'v2-0z')
-        self.assertEqual(k1.get('k2'), 'v2-1z')
-
-        del k0['k1']
-        del k0['k1', 1]
-        self.assertTrue(k0['k1'] is None)
-        self.assertTrue(k1['k1'] is None)
-        del k1['k2']
-        del k1['k2', 0]
-        self.assertTrue(k0['k2'] is None)
-        self.assertTrue(k1['k2'] is None)
-
-        k0['k3'] = 'v3-0'
-        k0['k03'] = 'v03'
-        k1['k3'] = 'v3-1'
-        k1['k13'] = 'v13'
-        self.assertTrue('k3' in k0)
-        self.assertTrue('k03' in k0)
-        self.assertTrue('k13' not in k0)
-        self.assertTrue('k3' in k1)
-        self.assertTrue('k13' in k1)
-        self.assertTrue('k03' not in k1)
-
-        self.assertEqual(sorted(k0.match_prefix('k')), ['k03', 'k3'])
-        self.assertEqual(sorted(k0.match_prefix('k', db=1)), ['k13', 'k3'])
-        self.assertEqual(sorted(k1.match_prefix('k')), ['k13', 'k3'])
-        self.assertEqual(sorted(k1.match_prefix('k', db=0)), ['k03', 'k3'])
-
-        self.assertEqual(sorted(k0.match_regex('k')), ['k03', 'k3'])
-        self.assertEqual(sorted(k0.match_regex('k', db=1)), ['k13', 'k3'])
-        self.assertEqual(sorted(k1.match_regex('k')), ['k13', 'k3'])
-        self.assertEqual(sorted(k1.match_regex('k', db=0)), ['k03', 'k3'])
-
-        self.assertEqual(sorted(k0.keys()), ['i', 'j', 'k03', 'k3'])
-        self.assertEqual(sorted(k0.keys(1)), ['i', 'j', 'k13', 'k3'])
-        self.assertEqual(sorted(k1.keys()), ['i', 'j', 'k13', 'k3'])
-        self.assertEqual(sorted(k1.keys(0)), ['i', 'j', 'k03', 'k3'])
-
-        k0.clear()
-        self.assertTrue('k3' not in k0)
-        self.assertTrue('k3' in k1)
-        k1.clear()
-        self.assertTrue('k3' not in k1)
 
 
 class TestMultipleThreads(BaseTestCase):

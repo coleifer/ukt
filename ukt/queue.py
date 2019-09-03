@@ -24,17 +24,22 @@ class LuaQueue(object):
 
         return self.kt.raw_script(fn, data)
 
-    def add(self, item):
-        return int(self._lua('queue_add', None, {'data': item})[b'id'])
+    def add(self, item, score=None):
+        raw_data = {'score': score} if score is not None else {}
+        return int(self._lua('queue_add', raw_data, {'data': item})[b'id'])
 
-    def extend(self, items):
+    def extend(self, items, score=None):
+        raw_data = {'score': score} if score is not None else {}
         value_data = {str(i): item for i, item in enumerate(items)}
-        return int(self._lua('queue_madd', None, value_data)[b'num'])
+        return int(self._lua('queue_madd', raw_data, value_data)[b'num'])
 
-    def _item_list(self, fn, n=1, timeout=None, value_data=None):
+    def _item_list(self, fn, n=1, timeout=None, value_data=None,
+                   min_score=None):
         raw_data = {'n': n}
         if timeout is not None:
             raw_data['timeout'] = timeout
+        if min_score is not None:
+            raw_data['min_score'] = min_score
 
         items = self._lua(fn, raw_data, value_data)
         if n == 1:
@@ -46,32 +51,41 @@ class LuaQueue(object):
                 accum.append(self.kt.decode_value(items[key]))
         return accum
 
-    def pop(self, n=1):
-        return self._item_list('queue_pop', n)
-    def rpop(self, n=1):
-        return self._item_list('queue_rpop', n)
+    def pop(self, n=1, min_score=None):
+        return self._item_list('queue_pop', n, min_score=min_score)
+    def rpop(self, n=1, min_score=None):
+        return self._item_list('queue_rpop', n, min_score=min_score)
 
-    def bpop(self, timeout=None):
-        return self._item_list('queue_bpop', 1, timeout)
+    def bpop(self, timeout=None, min_score=None):
+        return self._item_list('queue_bpop', 1, timeout, min_score=min_score)
 
-    def peek(self, n=1):
-        return self._item_list('queue_peek', n)
-    def rpeek(self, n=1):
-        return self._item_list('queue_rpeek', n)
+    def peek(self, n=1, min_score=None):
+        return self._item_list('queue_peek', n, min_score=min_score)
+    def rpeek(self, n=1, min_score=None):
+        return self._item_list('queue_rpeek', n, min_score=min_score)
 
     def count(self):
         return int(self._lua('queue_size')[b'num'])
     __len__ = count
 
-    def remove(self, data, n=None):
-        if n is None: n = -1
+    def remove(self, data, n=None, min_score=None):
+        raw_data = {'n': -1 if n is None else n}
+        if min_score is not None:
+            raw_data['min_score'] = min_score
         value_data = {'data': data}
-        return int(self._lua('queue_remove', {'n': n}, value_data)[b'num'])
+        return int(self._lua('queue_remove', raw_data, value_data)[b'num'])
 
-    def rremove(self, data, n=None):
-        if n is None: n = -1
+    def rremove(self, data, n=None, min_score=None):
+        raw_data = {'n': -1 if n is None else n}
+        if min_score is not None:
+            raw_data['min_score'] = min_score
         value_data = {'data': data}
-        return int(self._lua('queue_rremove', {'n': n}, value_data)[b'num'])
+        return int(self._lua('queue_rremove', raw_data, value_data)[b'num'])
+
+    def set_priority(self, data, score, n=None):
+        raw_data = {'score': score, 'n': -1 if n is None else n}
+        value_data = {'data': data}
+        return int(self._lua('queue_set_score', raw_data, value_data)[b'num'])
 
     def clear(self):
         return int(self._lua('queue_clear')[b'num'])
