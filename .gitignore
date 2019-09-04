@@ -1,2 +1,4 @@
 ukt/serializer.c
 ukt/serializer*.so
+build/*
+ukt/__pycache__/
