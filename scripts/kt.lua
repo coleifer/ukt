@@ -13,27 +13,50 @@ function _select_db(inmap)
   return db
 end
 
+
 -- helper function for hash functions.
-function hkv(inmap, outmap, fn)
+function hkv(inmap, outmap, fn, atomic, readonly)
   local key = inmap.table_key
   if not key then
     kt.log("system", "hash function missing required: 'table_key'")
     return kt.RVEINVALID
+  else
+    inmap.table_key = nil
   end
+
   local db = _select_db(inmap) -- Allow db to be specified as argument.
-  inmap.table_key = nil
-  local value, xt = db:get(key)
-  local value_tbl = {}
-  if value then
-    value_tbl = kt.mapload(value)
-  end
-  local new_value, ok = fn(key, value_tbl, inmap, outmap)
-  if ok then
-    if new_value and not db:set(key, kt.mapdump(new_value), xt) then
-      return kt.RVEINTERNAL
-    else
-      return kt.RVSUCCESS
+  local ok = false
+
+  local function visit(key, value, xt)
+    local value_tbl = {}
+    if value then
+      value_tbl = kt.mapload(value)
     end
+    local new_value
+    new_value, ok = fn(key, value_tbl, inmap, outmap)
+    if ok and new_value then
+      return kt.mapdump(new_value), xt
+    else
+      return kt.Visitor.NOP
+    end
+  end
+
+  if atomic then
+    if not db:accept(key, visit, not readonly) then
+      return kt.RVEINTERNAL
+    end
+  else
+    local value, xt = db:get(key)
+    local new_value, new_xt = visit(key, value, xt)
+    if ok and new_value ~= kt.Visitor.NOP then
+      if not db:set(key, new_value, new_xt) then
+        return kt.RVEINTERNAL
+      end
+    end
+  end
+
+  if ok then
+    return kt.RVSUCCESS
   else
     return kt.RVELOGIC
   end
@@ -52,7 +75,7 @@ function hmset(inmap, outmap)
     o.num = num
     return v, true
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true)
 end
 
 
@@ -66,7 +89,7 @@ function hmget(inmap, outmap)
     end
     return nil, true
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true, true)
 end
 
 
@@ -85,7 +108,7 @@ function hmdel(inmap, outmap)
     o.num = num
     return v, true
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true)
 end
 
 
@@ -99,7 +122,7 @@ function hgetall(inmap, outmap)
     end
     return nil, true
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true, true)
 end
 
 
@@ -116,7 +139,7 @@ function hset(inmap, outmap)
     o.num = 1
     return v, true
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true)
 end
 
 
@@ -138,7 +161,7 @@ function hsetnx(inmap, outmap)
       return v, true
     end
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true)
 end
 
 
@@ -154,7 +177,7 @@ function hget(inmap, outmap)
     o.value = v[key]
     return nil, true
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true, true)
 end
 
 
@@ -175,7 +198,7 @@ function hdel(inmap, outmap)
     end
     return v, true
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true)
 end
 
 
@@ -191,7 +214,7 @@ function hlen(inmap, outmap)
     o.num = count
     return nil, true
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true, true)
 end
 
 
@@ -211,7 +234,7 @@ function hcontains(inmap, outmap)
     end
     return nil, true
   end
-  return hkv(inmap, outmap, fn)
+  return hkv(inmap, outmap, fn, true, true)
 end
 
 
@@ -328,26 +351,46 @@ end
 
 
 -- helper function for set functions.
-function skv(inmap, outmap, fn)
+function skv(inmap, outmap, fn, atomic, readonly)
   local key = inmap.key
   if not key then
     kt.log("system", "set function missing required: 'key'")
     return kt.RVEINVALID
+  else
+    inmap.key = nil
   end
   local db = _select_db(inmap) -- Allow db to be specified as argument.
-  inmap.key = nil
-  local value, xt = db:get(key)
-  local value_tbl = {}
-  if value then
-    value_tbl = kt.mapload(value)
-  end
-  local new_value, ok = fn(key, value_tbl, inmap, outmap)
-  if ok then
-    if new_value and not db:set(key, kt.mapdump(new_value), xt) then
-      return kt.RVEINTERNAL
-    else
-      return kt.RVSUCCESS
+  local ok = false
+  local function visit(key, value, xt)
+    local value_tbl = {}
+    if value then
+      value_tbl = kt.mapload(value)
     end
+    local new_value
+    new_value, ok = fn(key, value_tbl, inmap, outmap)
+    if ok and new_value then
+      return kt.mapdump(new_value), xt
+    else
+      return kt.Visitor.NOP
+    end
+  end
+
+  if atomic then
+    if not db:accept(key, visit, not readonly) then
+      return kt.RVEINTERNAL
+    end
+  else
+    local value, xt = db:get(key)
+    local new_value, new_xt = visit(key, value, xt)
+    if ok and new_value ~= kt.Visitor.NOP then
+      if not db:set(key, new_value, new_xt) then
+        return kt.RVEINTERNAL
+      end
+    end
+  end
+
+  if ok then
+    return kt.RVSUCCESS
   else
     return kt.RVELOGIC
   end
@@ -373,7 +416,7 @@ function sadd(inmap, outmap)
       return v, true
     end
   end
-  return skv(inmap, outmap, fn)
+  return skv(inmap, outmap, fn, true)
 end
 
 
@@ -389,7 +432,7 @@ function scard(inmap, outmap)
     o.num = count
     return nil, true
   end
-  return skv(inmap, outmap, fn)
+  return skv(inmap, outmap, fn, true, true)
 end
 
 
@@ -409,7 +452,7 @@ function sismember(inmap, outmap)
     end
     return nil, true
   end
-  return skv(inmap, outmap, fn)
+  return skv(inmap, outmap, fn, true, true)
 end
 
 
@@ -425,7 +468,7 @@ function smembers(inmap, outmap)
     end
     return nil, true
   end
-  return skv(inmap, outmap, fn)
+  return skv(inmap, outmap, fn, true, true)
 end
 
 
@@ -443,7 +486,7 @@ function spop(inmap, outmap)
     end
     return nil, true
   end
-  return skv(inmap, outmap, fn)
+  return skv(inmap, outmap, fn, true)
 end
 
 
@@ -467,7 +510,7 @@ function srem(inmap, outmap)
       return nil, true
     end
   end
-  return skv(inmap, outmap, fn)
+  return skv(inmap, outmap, fn, true)
 end
 
 
@@ -559,27 +602,49 @@ function sdiff(inmap, outmap)
 end
 
 
--- helper function for list functions.
-function lkv(inmap, outmap, fn)
+-- Helper function for processing a list, optionally atomically.
+function lkv(inmap, outmap, fn, atomic, readonly)
   local key = inmap.key
   if not key then
     kt.log("system", "list function missing required: 'key'")
     return kt.RVEINVALID
+  else
+    inmap.key = nil
   end
+
   local db = _select_db(inmap) -- Allow db to be specified as argument.
-  inmap.key = nil
-  local value, xt = db:get(key)
-  local value_array = {}
-  if value then
-    value_array = kt.arrayload(value)
-  end
-  local new_value, ok = fn(key, value_array, inmap, outmap)
-  if ok then
-    if new_value and not db:set(key, kt.arraydump(new_value), xt) then
-      return kt.RVEINTERNAL
-    else
-      return kt.RVSUCCESS
+  local ok = false
+
+  local function visit(key, value, xt)
+    local value_array = {}
+    if value then
+      value_array = kt.arrayload(value)
     end
+    local new_value
+    new_value, ok = fn(key, value_array, inmap, outmap)
+    if ok and new_value then
+      return kt.arraydump(new_value), xt
+    else
+      return kt.Visitor.NOP
+    end
+  end
+
+  if atomic then
+    if not db:accept(key, visit, not readonly) then
+      return kt.RVEINTERNAL
+    end
+  else
+    local value, xt = db:get(key)
+    local new_value, new_xt = visit(key, value, xt)
+    if ok and new_value ~= kt.Visitor.NOP then
+      if not db:set(key, new_value, new_xt) then
+        return kt.RVEINTERNAL
+      end
+    end
+  end
+
+  if ok then
+    return kt.RVSUCCESS
   else
     return kt.RVELOGIC
   end
@@ -600,7 +665,7 @@ function llpush(inmap, outmap)
     outmap.length = #arr
     return arr, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true)
 end
 
 -- Redis-like RPUSH
@@ -617,7 +682,7 @@ function lrpush(inmap, outmap)
     outmap.length = #arr
     return arr, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true)
 end
 
 
@@ -639,7 +704,7 @@ function lextend(inmap, outmap)
     outmap.length = #arr
     return arr, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true)
 end
 
 
@@ -685,7 +750,7 @@ function lrange(inmap, outmap)
     end
     return nil, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true, true)
 end
 
 
@@ -701,7 +766,7 @@ function lindex(inmap, outmap)
     end
     return nil, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true, true)
 end
 
 
@@ -733,7 +798,7 @@ function linsert(inmap, outmap)
     outmap.length = #arr
     return arr, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true)
 end
 
 
@@ -746,7 +811,7 @@ function llpop(inmap, outmap)
     table.remove(arr, 1)
     return arr, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true)
 end
 
 
@@ -759,7 +824,7 @@ function lrpop(inmap, outmap)
     arr[#arr] = nil
     return arr, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true)
 end
 
 
@@ -777,7 +842,7 @@ function lrem(inmap, outmap)
     table.remove(arr, index)
     return arr, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true)
 end
 
 
@@ -814,7 +879,7 @@ function lremrange(inmap, outmap)
     outmap.length = #arr
     return arr, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true)
 end
 
 
@@ -826,7 +891,7 @@ function llen(inmap, outmap)
     outmap.num = #arr
     return nil, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true, true)
 end
 
 
@@ -848,7 +913,7 @@ function lset(inmap, outmap)
     outmap['num'] = 1
     return arr, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true)
 end
 
 
@@ -866,7 +931,7 @@ function lfind(inmap, outmap)
     end
     return nil, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true, true)
 end
 
 
@@ -885,7 +950,7 @@ function lrfind(inmap, outmap)
     end
     return nil, true
   end
-  return lkv(inmap, outmap, fn)
+  return lkv(inmap, outmap, fn, true, true)
 end
 
 

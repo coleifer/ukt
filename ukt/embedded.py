@@ -76,10 +76,11 @@ class EmbeddedServer(object):
 
         logger.info('server shutdown')
 
-    def _stop_server(self):
+    def _stop_server(self, wait=False):
         self._server_terminated.set()
         self._server_p.terminate()
-        self._server_p.wait()
+        if wait:
+            self._server_p.wait()
         self._server_p = self._client = None
 
     def run(self):
@@ -120,7 +121,7 @@ class EmbeddedServer(object):
         raise KTError('Unable to connect to server on %s:%s' %
                                (self.host, self.port))
 
-    def stop(self):
+    def stop(self, wait=False):
         if self._server_terminated.is_set():
             logger.warning('server already stopped')
             return False
@@ -133,7 +134,7 @@ class EmbeddedServer(object):
                 if fn != self._stop_server:
                     funcs.append((fn, arg, kw))
             atexit._exithandlers = funcs
-        self._stop_server()
+        self._stop_server(wait=wait)
         return True
 
     def _find_open_port(self):

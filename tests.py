@@ -1795,6 +1795,26 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(l.pack('k2', 'k4', 0), 0)
         self.assertEqual(l.get_range(), ['foo', 'bar'])
 
+    def test_list_errors(self):
+        l = self.db.List('l1')
+        #self.db.set_bulk({'k%02d' % i: 'i%s' % i for i in range(10)})
+
+        def _lua(cmd, data):
+            with self.assertRaises(ProtocolError):
+                self.db.script(cmd, data, encode_values=False,
+                               decode_values=False)
+
+        _lua('llpush', {})  # Missing key.
+        _lua('llpush', {'key': 'l1'})  # Missing value.
+
+        l.append('item-1')
+
+        _lua('lremrange', {'key': 'l1', 'start': '1'})  # Invalid start idx.
+        _lua('lremrange', {'key': 'l1', 'start': '0', 'stop': '2'})  # Stop.
+        _lua('lset', {'key': 'l1', 'index': '2'})  # Missing value.
+
+        self.assertEqual(list(l), ['item-1'])
+
     def test_large_values(self):
         n = 200
         h = self.db.Hash('h')
@@ -2423,7 +2443,7 @@ class TestConnectionError(unittest.TestCase):
         self.assertEqual(self.db.get('k1'), 'v1')
 
         # Restart the server.
-        self.server.stop()
+        self.server.stop(wait=True)
         self.server.run()
 
         self.assertRaises(ServerConnectionError, self.db.get, 'k1')
