@@ -72,6 +72,50 @@ Kyoto Tycoon client
         commands, *ukt* will transparently use the appropriate connection type
         for a given method.
 
+    .. py:method:: serialize_dict(d, encode_values=True)
+
+        :param dict d: arbitrary data.
+        :param bool encode_values: serialize the values using the configured
+            serialization scheme.
+        :return: serialized data.
+
+        Serialize a ``dict`` as a sequence of bytes compatible with KT's
+        built-in lua ``mapdump`` function and the :py:class:`Hash` container
+        type.
+
+    .. py:method:: deserialize_dict(data, decode_values=True)
+
+        :param bytes data: serialized data.
+        :param bool decode_values: decode values using the configured
+            serialization scheme.
+        :return: data ``dict``.
+
+        Deserialize a sequence of bytes into a dictionary, optionally decoding
+        the values as unicode strings. Compatible with KT's built-in lua
+        ``mapload`` function and the :py:class:`Hash` container type.
+
+    .. py:method:: serialize_list(l, encode_values=True)
+
+        :param list l: arbitrary data.
+        :param bool encode_values: serialize the values using the configured
+            serialization scheme.
+        :return: serialized data.
+
+        Serialize a ``list`` as a sequence of bytes compatible with KT's
+        built-in lua ``arraydump`` function and the :py:class:`List` container
+        type.
+
+    .. py:method:: deserialize_list(data, decode_values=True)
+
+        :param bytes data: serialized data.
+        :param bool decode_values: decode values using the configured
+            serialization scheme.
+        :return: data ``list``.
+
+        Deserialize a a sequence of bytes into a list, optionally decoding the
+        values as unicode strings. Compatible with KT's built-in lua
+        ``arrayload`` function and the :py:class:`List` container type.
+
     .. py:method:: get_bulk(keys, db=None, decode_values=True)
 
         :param list keys: keys to retrieve.
@@ -128,9 +172,9 @@ Kyoto Tycoon client
         and ``expire_time`` values will be used for all key/value pairs being
         set.
 
-    .. py:method:: set_bulk_raw(data, no_reply=False, encode_values=True)
+    .. py:method:: set_bulk_details(data, no_reply=False, encode_values=True)
 
-        :param list data: a list of 4-tuples: ``(db, key, value, expire time)``
+        :param list data: a list of 4-tuples: ``(db, key, value, expire-time)``
         :param bool no_reply: execute the operation without a server
             acknowledgment.
         :param bool encode_values: serialize the values using the configured
@@ -155,6 +199,18 @@ Kyoto Tycoon client
 
         Set a single key/value pair.
 
+    .. py:method:: set_bytes(key, value, db=None, expire_time=None, no_reply=False)
+
+        :param str key: key to set.
+        :param bytes value: raw bytes to store.
+        :param int db: database index.
+        :param int expire_time: expiration time in seconds.
+        :param bool no_reply: execute the operation without a server
+            acknowledgment.
+        :return: number of rows set (1)
+
+        Set a single key/value pair, without serializing the value.
+
     .. py:method:: remove_bulk(keys, db=None, no_reply=False)
 
         :param list keys: list of keys to remove
@@ -163,7 +219,9 @@ Kyoto Tycoon client
             acknowledgment.
         :return: number of keys that were removed
 
-    .. py:method:: remove_bulk_raw(db_key_list, no_reply=False)
+        Remove multiple keys from a database in a single operation.
+
+    .. py:method:: remove_bulk_details(db_key_list, no_reply=False)
 
         :param db_key_list: a list of 2-tuples to retrieve: ``(db index, key)``
         :param bool no_reply: execute the operation without a server
@@ -171,7 +229,8 @@ Kyoto Tycoon client
         :return: number of keys that were removed
 
         Like :py:meth:`~KyotoTycoon.remove_bulk`, but allows keys to be removed
-        from multiple databases in a single call.
+        from multiple databases in a single call. The input is a list of
+        ``(db, key)`` tuples.
 
     .. py:method:: remove(key, db=None, no_reply=False)
 
@@ -180,6 +239,8 @@ Kyoto Tycoon client
         :param bool no_reply: execute the operation without a server
             acknowledgment.
         :return: number of rows removed
+
+        Remove a single key from the database.
 
     .. py:method:: script(name, data=None, no_reply=False, encode_values=True, decode_values=True)
 
@@ -197,13 +258,59 @@ Kyoto Tycoon client
         Likewise, if ``decode_values`` is ``True`` the values returned by the
         Lua function will be deserialized using the configured serializer.
 
-    .. py:method:: exists(key, db=None)
+    .. py:method:: raw_script(name, data=None, no_reply=False)
 
-        :param str key: key to test.
+        :param str name: name of lua function to call.
+        :param dict data: mapping of key/value pairs to pass to lua function.
+        :param bool no_reply: execute the operation without a server
+            acknowledgment.
+        :return: dictionary of key/value pairs returned by function.
+
+        Execute a lua function and return the result with no post-processing or
+        serialization.
+
+    .. py:method:: report()
+
+        :return: status fields and values
+        :rtype: dict
+
+        Obtain report on overall status of server, including all databases.
+
+    .. py:method:: status(db=None)
+
+        :param int db: database index
+        :return: status fields and values
+        :rtype: dict
+
+        Obtain status information from the server about the selected database.
+
+    .. py:method:: list_databases()
+
+        :return: a list of ``(database path, status dict)`` for each configured
+            database.
+
+        Return the list of databases and their status information.
+
+    .. py:attribute:: databases
+
+        Returns the list of paths for the configured databases.
+
+    .. py:method:: clear(db=None)
+
+        :param int db: database index
+        :return: boolean indicating success
+
+        Remove all keys from the database.
+
+    .. py:method:: synchronize(hard=False, command=None, db=None)
+
+        :param bool hard: perform a "hard" synchronization.
+        :param str command: command to execute after synchronization.
         :param int db: database index.
-        :return: boolean indicating if key exists.
+        :return: boolean indicating success.
 
-        Return whether or not the given key exists in the database.
+        Synchronize the database, optionally executing the given command upon
+        success. This can be used to create hot backups, for example.
 
     .. py:method:: add(key, value, db=None, expire_time=None, encode_value=True)
 
@@ -247,32 +354,6 @@ Kyoto Tycoon client
         Appends data to an existing key/value pair. If the key does not exist,
         this is equivalent to :py:meth:`~KyotoTycoon.set`.
 
-    .. py:method:: cas(key, old_val, new_val, db=None, expire_time=None, encode_value=True)
-
-        :param str key: key to append value to.
-        :param old_val: original value to test.
-        :param new_val: new value to store.
-        :param int db: database index.
-        :param int expire_time: expiration time in seconds.
-        :param bool encode_value: serialize the old and new values using the
-            configured serialization method.
-        :return: boolean indicating if compare-and-swap succeeded.
-        :rtype: bool
-
-        Perform an atomic compare-and-set the value stored at a given key.
-
-    .. py:method:: seize(key, db=None, decode_value=True)
-
-        :param str key: key to remove.
-        :param int db: database index.
-        :param bool decode_value: deserialize the value using the configured
-            serialization method.
-        :return: value stored at given key or ``None`` if key does not exist.
-
-        Perform atomic get-and-remove the value stored in a given key. This
-        method is also available as :py:meth:`KyotoTycoon.pop` if that's easier
-        to remember.
-
     .. py:method:: increment(key, n=1, orig=None, db=None, expire_time=None)
 
         :param str key: key to increment.
@@ -297,6 +378,28 @@ Kyoto Tycoon client
 
         Increment the floating-point value stored in the given key.
 
+    .. py:method:: cas(key, old_val, new_val, db=None, expire_time=None, encode_value=True)
+
+        :param str key: key to append value to.
+        :param old_val: original value to test.
+        :param new_val: new value to store.
+        :param int db: database index.
+        :param int expire_time: expiration time in seconds.
+        :param bool encode_value: serialize the old and new values using the
+            configured serialization method.
+        :return: boolean indicating if compare-and-swap succeeded.
+        :rtype: bool
+
+        Perform an atomic compare-and-set the value stored at a given key.
+
+    .. py:method:: exists(key, db=None)
+
+        :param str key: key to test.
+        :param int db: database index.
+        :return: boolean indicating if key exists.
+
+        Return whether or not the given key exists in the database.
+
     .. py:method:: length(key, db=None)
 
         :param str key: key.
@@ -306,12 +409,25 @@ Kyoto Tycoon client
         Return the length of the raw value stored at the given key. If the key
         does not exist, returns ``None``.
 
-    .. py:method:: clear(db=None)
+    .. py:method:: seize(key, db=None, decode_value=True)
 
+        :param str key: key to remove.
+        :param int db: database index.
+        :param bool decode_value: deserialize the value using the configured
+            serialization method.
+        :return: value stored at given key or ``None`` if key does not exist.
+
+        Perform atomic get-and-remove the value stored in a given key. This
+        method is also available as :py:meth:`KyotoTycoon.pop` if that's easier
+        to remember.
+
+    .. py:method:: vacuum(step=0, db=None)
+
+        :param int step: number of steps, default is 0
         :param int db: database index
         :return: boolean indicating success
 
-        Remove all keys from the database.
+        Vacuum the database.
 
     .. py:method:: match_prefix(prefix, max_keys=None, db=None)
 
@@ -344,37 +460,6 @@ Kyoto Tycoon client
 
         Return sorted list of keys that are within a given edit distance from
         a string.
-
-    .. py:method:: report()
-
-        :return: status fields and values
-        :rtype: dict
-
-        Obtain report on overall status of server, including all databases.
-
-    .. py:method:: status(db=None)
-
-        :param int db: database index
-        :return: status fields and values
-        :rtype: dict
-
-        Obtain status information from the server about the selected database.
-
-    .. py:method:: synchronize(hard=False, command=None, db=None)
-
-        :param bool hard: perform a "hard" synchronization.
-        :param str command: command to execute after synchronization.
-        :param int db: database index.
-        :return: boolean indicating success.
-
-        Synchronize the database, optionally executing the given command upon
-        success. This can be used to create hot backups, for example.
-
-    .. py:method:: vacuum(step=0, db=None)
-
-        :param int step: number of steps, default is 0
-        :param int db: database index
-        :return: boolean indicating success
 
     .. py:method:: ulog_list()
 
@@ -417,6 +502,86 @@ Kyoto Tycoon client
 
         Property which exposes the size information returned by the
         :py:meth:`~KyotoTycoon.status` API.
+
+    .. py:method:: __getitem__(key_or_keydb)
+
+        Item-lookup based on either ``key`` or a 2-tuple consisting of
+        ``(key, db)``. Follows same semantics as :py:meth:`~KyotoTycoon.get`.
+
+    .. py:method:: __setitem__(key_or_keydb, value_or_valueexpire)
+
+        Item-setting based on either ``key`` or a 2-tuple consisting of
+        ``(key, db)``. Value consists of either a ``value`` or a 2-tuple
+        consisting of ``(value, expire_time)``. Follows same semantics
+        as :py:meth:`~KyotoTycoon.set`.
+
+    .. py:method:: __delitem__(key_or_keydb)
+
+        Item-deletion based on either ``key`` or a 2-tuple consisting of
+        ``(key, db)``. Follows same semantics as :py:meth:`~KyotoTycoon.remove`.
+
+    .. py:method:: __contains__(key_or_keydb)
+
+        Check if key exists. Accepts either ``key`` or a 2-tuple consisting of
+        ``(key, db)``. Follows same semantics as :py:meth:`~KyotoTycoon.exists`.
+
+    .. py:method:: __len__()
+
+        :return: total number of keys in the default database.
+        :rtype: int
+
+    .. py:method:: update(__data=None, **kwargs)
+
+        :param dict __data: optionally provide data as a dictionary.
+        :param kwargs: provide data as keyword arguments.
+        :return: number of keys that were set.
+
+        Efficiently set or update multiple key/value pairs. Provided for
+        compatibility with ``dict`` interface. For more control use the
+        :py:meth:`~KyotoTycoon.set_bulk`.
+
+    .. py:method:: pop(key, db=None, decode_value=True)
+
+        Get and remove the data stored in a given key in a single operation.
+
+        See :py:meth:`KyotoTycoon.seize`.
+
+    .. py:method:: keys(db=None)
+
+        :param int db: database index
+        :return: all keys in database
+        :rtype: generator
+
+        .. warning::
+            The :py:meth:`~KyotoCabinet.keys` method uses a cursor and can be
+            very slow.
+
+    .. py:method:: keys_nonlazy(db=None)
+
+        :param int db: database index
+        :return: all keys in database
+        :rtype: list
+
+        Non-lazy implementation of :py:meth:`~KyotoTycoon.keys`.
+        Behind-the-scenes, calls :py:meth:`~KyotoTycoon.match_prefix` with an
+        empty string as the prefix.
+
+    .. py:method:: values(db=None)
+
+        :param int db: database index
+        :return: all values in database
+        :rtype: generator
+
+    .. py:method:: items(db=None)
+
+        :param int db: database index
+        :return: all key/value tuples in database
+        :rtype: generator
+
+    .. py:method:: __iter__()
+
+        Iterating over the database yields an iterator over the keys of the
+        database. Equivalent to :py:meth:`~KyotoTycoon.keys`.
 
     .. py:method:: touch(key, xt=None, db=None)
 
@@ -488,78 +653,54 @@ Kyoto Tycoon client
 
         If the last command was successful, then (0, 'success') is returned.
 
-    .. py:method:: Hash(key, encode_values=True, decode_values=True)
+    .. py:method:: Hash(key, encode_values=True, decode_values=True, db=None)
 
         :param str key: key to store the hash table.
         :param bool encode_values: serialize the hash values using the
             configured serializer.
         :param bool decode_values: de-serialize the hash values using the
             configured serializer.
+        :param int db: database index.
 
         Create a :py:class:`Hash` container instance.
 
-    .. py:method:: List(key, encode_values=True, decode_values=True)
+    .. py:method:: List(key, encode_values=True, decode_values=True, db=None)
 
         :param str key: key to store the list.
         :param bool encode_values: serialize the list items using the
             configured serializer.
         :param bool decode_values: de-serialize the list items using the
             configured serializer.
+        :param int db: database index.
 
         Create a :py:class:`List` container instance.
 
-    .. py:method:: Set(key, encode_values=True, decode_values=True)
+    .. py:method:: Set(key, encode_values=True, decode_values=True, db=None)
 
         :param str key: key to store the set.
         :param bool encode_values: serialize the set keys using the
             configured serializer.
         :param bool decode_values: de-serialize the set keys using the
             configured serializer.
+        :param int db: database index.
 
         Create a :py:class:`Set` container instance.
 
-    .. py:method:: __getitem__(key_or_keydb)
+    .. py:method:: Queue(key, db=None)
 
-        Item-lookup based on either ``key`` or a 2-tuple consisting of
-        ``(key, db)``. Follows same semantics as :py:meth:`~KyotoTycoon.get`.
+        :param str key: key to use for the queue metadata.
+        :param int db: database index.
 
-    .. py:method:: __setitem__(key_or_keydb, value_or_valueexpire)
+        Create a :py:class:`Queue`, which provides efficient operations for
+        implementing a priority queue.
 
-        Item-setting based on either ``key`` or a 2-tuple consisting of
-        ``(key, db)``. Value consists of either a ``value`` or a 2-tuple
-        consisting of ``(value, expire_time)``. Follows same semantics
-        as :py:meth:`~KyotoTycoon.set`.
+    .. py:method:: Schedule(key, db=None)
 
-    .. py:method:: __delitem__(key_or_keydb)
+        :param str key: key to use for the schedule metadata.
+        :param int db: database index.
 
-        Item-deletion based on either ``key`` or a 2-tuple consisting of
-        ``(key, db)``. Follows same semantics as :py:meth:`~KyotoTycoon.remove`.
-
-    .. py:method:: __contains__(key_or_keydb)
-
-        Check if key exists. Accepts either ``key`` or a 2-tuple consisting of
-        ``(key, db)``. Follows same semantics as :py:meth:`~KyotoTycoon.exists`.
-
-    .. py:method:: __len__()
-
-        :return: total number of keys in the default database.
-        :rtype: int
-
-    .. py:method:: update(__data=None, **kwargs)
-
-        :param dict __data: optionally provide data as a dictionary.
-        :param kwargs: provide data as keyword arguments.
-        :return: number of keys that were set.
-
-        Efficiently set or update multiple key/value pairs. Provided for
-        compatibility with ``dict`` interface. For more control use the
-        :py:meth:`~KyotoTycoon.set_bulk`.
-
-    .. py:method:: pop(key, db=None, decode_value=True)
-
-        Get and remove the data stored in a given key in a single operation.
-
-        See :py:meth:`KyotoTycoon.seize`.
+        Create a :py:class:`Schedule`, which provides efficient operations for
+        implementing a sorted schedule.
 
     .. py:method:: cursor(db=None, cursor_id=None)
 
@@ -567,76 +708,8 @@ Kyoto Tycoon client
         :param int cursor_id: cursor id (will be automatically created if None)
         :return: :py:class:`Cursor` object
 
-    .. py:method:: keys(db=None)
 
-        :param int db: database index
-        :return: all keys in database
-        :rtype: generator
-
-        .. warning::
-            The :py:meth:`~KyotoCabinet.keys` method uses a cursor and can be
-            very slow.
-
-    .. py:method:: keys_nonlazy(db=None)
-
-        :param int db: database index
-        :return: all keys in database
-        :rtype: list
-
-        Non-lazy implementation of :py:meth:`~KyotoTycoon.keys`.
-        Behind-the-scenes, calls :py:meth:`~KyotoTycoon.match_prefix` with an
-        empty string as the prefix.
-
-    .. py:method:: values(db=None)
-
-        :param int db: database index
-        :return: all values in database
-        :rtype: generator
-
-    .. py:method:: items(db=None)
-
-        :param int db: database index
-        :return: all key/value tuples in database
-        :rtype: generator
-
-    .. py:method:: serialize_dict(d)
-
-        :param dict d: arbitrary data.
-        :return: serialized data.
-
-        Serialize a ``dict`` as a sequence of bytes compatible with KT's
-        built-in lua ``mapdump`` function.
-
-    .. py:method:: deserialize_dict(data, decode_values=True)
-
-        :param bytes data: serialized data.
-        :param bool decode_values: decode values to unicode strings.
-        :return: data ``dict``.
-
-        Deserialize a a sequence of bytes into a dictionary, optionally
-        decoding the values as unicode strings. Compatible with KT's built-in
-        lua ``mapload`` function.
-
-    .. py:method:: serialize_list(l)
-
-        :param list l: arbitrary data.
-        :return: serialized data.
-
-        Serialize a ``list`` as a sequence of bytes compatible with KT's
-        built-in lua ``arraydump`` function.
-
-    .. py:method:: deserialize_list(data, decode_values=True)
-
-        :param bytes data: serialized data.
-        :param bool decode_values: decode values to unicode strings.
-        :return: data ``list``.
-
-        Deserialize a a sequence of bytes into a list, optionally decoding the
-        values as unicode strings. Compatible with KT's built-in lua
-        ``arrayload`` function.
-
-
-.. py:class:: Cursor(protocol, cursor_id, db=None)
+.. py:class:: Cursor(protocol, cursor_id, db=None, decode_values=True, encode_values=True)
 
     :param KyotoTycoon protocol: client instance.
     :param int cursor_id: cursor unique identifier.
@@ -708,9 +781,8 @@ Kyoto Tycoon client
 
         Remove the currently-selected record.
 
-    .. py:method:: seize(step=False)
+    .. py:method:: seize()
 
-        :param bool step: step to next record after writing.
         :return: ``(key, value)`` of the currently-selected record.
 
         Get and remove the currently-selected record.
@@ -728,59 +800,150 @@ Kyoto Tycoon client
     :param str key: key to store queue data.
     :param int db: database index.
 
-    Queue implementation using lua functions (provided in ``scripts/kt.lua``).
+    Priority queue implementation using lua functions (provided in
+    the ``scripts/kt.lua`` module).
 
-    .. py:method:: add(item)
+    .. py:method:: add(item, score=None)
 
         :param item: item to add to queue.
+        :param int score: score (for priority support), higher values will be
+            dequeued first. If not provided, defaults to ``0``.
         :return: id of newly-added item.
 
-    .. py:method:: extend(items)
+    .. py:method:: extend(items, score=None)
 
         :param list items: list of items to add to queue.
+        :param int score: score (for priority support), higher values will be
+            dequeued first. If not provided, defaults to ``0``.
         :return: number of items added to queue.
 
-    .. py:method:: pop(n=1)
+    .. py:method:: pop(n=1, min_score=None)
 
         :param int n: number of items to remove from queue.
+        :param int min_score: minimum priority score. If not provided, all
+            items will be considered regardless of score.
         :return: either a single item or a list of items (depending on ``n``).
 
-    .. py:method:: rpop(n=1)
+        Pop one or more items from the head of the queue.
+
+    .. py:method:: rpop(n=1, min_score=None)
 
         :param int n: number of items to remove from end of queue.
+        :param int min_score: minimum priority score. If not provided, all
+            items will be considered regardless of score.
         :return: either a single item or a list of items (depending on ``n``).
 
-    .. py:method:: peek(n=1)
+        Pop one or more items from the end of the queue.
+
+    .. py:method:: bpop(timeout=None, min_score=None)
+
+        :param int timeout: seconds to block before giving up.
+        :param int min_score: minimum priority score. If not provided, all
+            items will be considered regardless of score.
+        :return: item from the head of the queue, or if no items are added
+            before the timeout, ``None`` is returned.
+
+        Pop an item from the queue, blocking if no items are available.
+
+    .. py:method:: peek(n=1, min_score=None)
 
         :param int n: number of items to read from queue.
+        :param int min_score: minimum priority score. If not provided, all
+            items will be considered regardless of score.
         :return: either a single item or a list of items (depending on ``n``).
 
-    .. py:method:: rpeek(n=1)
+        Read (without removing) one or more items from the head of the queue.
+
+    .. py:method:: rpeek(n=1, min_score=None)
 
         :param int n: number of items to read from end of queue.
+        :param int min_score: minimum priority score. If not provided, all
+            items will be considered regardless of score.
         :return: either a single item or a list of items (depending on ``n``).
+
+        Read (without removing) one or more items from the end of the queue.
 
     .. py:method:: count()
 
         :return: number of items in the queue.
 
-    .. py:method:: remove(data, n=None)
+    .. py:method:: remove(data, n=None, min_score=None)
 
         :param data: value to remove from queue.
         :param int n: max occurrences to remove.
+        :param int min_score: minimum priority score. If not provided, all
+            items will be considered regardless of score.
         :return: number of items removed.
 
-    .. py:method:: rremove(data, n=None)
+        Remove one or more items by value, starting from the head of the queue.
+
+    .. py:method:: rremove(data, n=None, min_score=None)
 
         :param data: value to remove from end of queue.
         :param int n: max occurrences to remove.
+        :param int min_score: minimum priority score. If not provided, all
+            items will be considered regardless of score.
         :return: number of items removed.
+
+        Remove one or more items by value, starting from the end of the queue.
+
+    .. py:method:: set_priority(data, score, n=None)
+
+        :param data: value to remove from end of queue.
+        :param int score: new score for the item.
+        :param int n: max occurrences to update.
+
+        Update the priority of one or more items in the queue, by value.
 
     .. py:method:: clear()
 
         :return: number of items in queue when cleared.
 
         Remove all items from queue.
+
+
+.. py:class:: Schedule(client, key, db=None)
+
+    :param KyotoTycoon client: client instance.
+    :param str key: key to store schedule data.
+    :param int db: database index.
+
+    Prioritized schedule implementation using lua functions (provided in
+    the ``scripts/kt.lua`` module).
+
+    .. py:method:: add(item, score=0)
+
+        :param item: add an item to the schedule.
+        :param int score: score (arrival time) of item.
+
+        Add an item to the schedule, with a given score / arrival time.
+
+    .. py:method:: read(score=None, n=None)
+
+        :param int score: score threshold or arrival time
+        :param int n: maximum number of items to read.
+        :return: a list of items
+
+        Destructively read up-to ``n`` items from the schedule, whose item
+        score is below the given ``score``.
+
+    .. py:method:: clear()
+
+        Clear the schedule, removing all items.
+
+    .. py:method:: count()
+
+        :return: number of items in the schedule.
+
+        Return the number of items in the schedule.
+
+    .. py:method:: items(n=None)
+
+        :param int n: limit the number of items to read.
+        :return: a list of up-to ``n`` items from the schedule.
+
+        Non-destructively read up-to ``n`` items from the schedule, in order of
+        score.
 
 
 Embedded Servers

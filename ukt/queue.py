@@ -4,7 +4,7 @@ import time
 from ukt.exceptions import SignalTimeout
 
 
-class LuaQueue(object):
+class Queue(object):
     """
     Helper-class for working with the Kyoto Tycoon Lua queue functions.
     """
@@ -184,7 +184,7 @@ class Schedule(object):
         return len(self.kt.match_prefix(self._key + '\t', db=self._db))
     __len__ = count
 
-    def items(self, limit=None):
-        keys = self.kt.match_prefix(self._key + '\t', limit, self._db)
+    def items(self, n=None):
+        keys = self.kt.match_prefix(self._key + '\t', n, self._db)
         data = self.kt.get_bulk(keys, db=self._db)
         return [data[k] for k in keys]

@@ -56,7 +56,7 @@ from ukt.exceptions import ServerConnectionError
 from ukt.exceptions import ServerError
 from ukt.exceptions import ServerTimeoutError
 from ukt.exceptions import SignalTimeout
-from ukt.queue import LuaQueue
+from ukt.queue import Queue
 from ukt.queue import Schedule
 from ukt.queue import SignalQueue
 from ukt.serializer import decode
@@ -632,7 +632,7 @@ class KyotoTycoon(object):
 
     def remove_bulk_details(self, db_key_list, no_reply=False):
         """
-        Get all data for a given list of db, key pairs.
+        Remove a given list keys. The input is a list of ``(db, key)`` tuples.
 
         :param db_key_list: a list of (db, key) tuples.
         :param bool no_reply: do not receive a response.
@@ -1562,9 +1562,9 @@ class KyotoTycoon(object):
 
     def Queue(self, key, db=None):
         """
-        Create a :py:class:`LuaQueue` instance.
+        Create a :py:class:`Queue` instance.
         """
-        return LuaQueue(self, key, db)
+        return Queue(self, key, db)
 
     def SignalQueue(self, key, signal='q', db=None, wait=10, cursor=None):
         """
