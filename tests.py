@@ -1487,6 +1487,10 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(h['k1'], 'v1-z')
         self.assertEqual(h.get_all(), {'k1': 'v1-z', 'k3': 'v3-z'})
 
+        # Ensure we can fetch the raw data from KT and deserialize it using the
+        # python implementation of mapload.
+        self.assertEqual(h.get_raw(), {'k1': 'v1-z', 'k3': 'v3-z'})
+
         # Ensure that the data is stored in the right key.
         self.assertTrue(self.db.get_bytes('h1') is not None)
         self.assertEqual(self.db.count(), 1)
@@ -1653,6 +1657,10 @@ class TestLuaContainers(BaseLuaTestCase):
         l.append('i4')
         self.assertEqual(len(l), 4)
         self.assertEqual(l[1:-1], ['i2', 'i3-x'])
+
+        # Ensure we can fetch the raw data from KT and deserialize it using the
+        # python implementation of mapload.
+        self.assertEqual(l.get_raw(), ['i1', 'i2', 'i3-x', 'i4'])
 
         self.assertTrue(self.db.exists('l1'))
         self.assertEqual(self.db.count(), 1)
@@ -1870,6 +1878,28 @@ class TestLuaContainers(BaseLuaTestCase):
         h = self.db.Hash('h2')
         self.assertEqual(h.pack_values('hv2'), 0)
         self.assertFalse(self.db.exists('hv2'))
+
+    def test_get_set_raw(self):
+        hdata = {'k1': 'v1', 'k2': {'x1': 'y1', 'x2': 'y2'}, 'k3': 0}
+        h = self.db.Hash('h')
+        h.set_raw(hdata)
+        self.assertEqual(h.get_raw(), hdata)
+        self.assertEqual(h.get_all(), hdata)
+        self.assertEqual(h['k1'], hdata['k1'])
+        self.assertEqual(h['k2'], hdata['k2'])
+        self.assertEqual(h['k3'], hdata['k3'])
+        self.db.remove(h.key)
+        self.assertEqual(h.get_raw(), None)
+
+        ldata = ['i1', {'x1': 'y1', 'x2': 'y2'}, 3.34, None, 'i5']
+        l = self.db.List('l')
+        l.set_raw(ldata)
+        self.assertEqual(l.get_raw(), ldata)
+        self.assertEqual(list(l), ldata)
+        for i in range(len(ldata)):
+            self.assertEqual(l[i], ldata[i])
+        self.db.remove(l.key)
+        self.assertEqual(l.get_raw(), None)
 
 
 class TestLuaContainersMultiDB(BaseLuaTestCase):

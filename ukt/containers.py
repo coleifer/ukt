@@ -128,6 +128,15 @@ class Hash(Container):
     __delitem__ = remove
     update = set_bulk
 
+    def get_raw(self):
+        # Extract the dictionary directly from KT and deserialize manually.
+        raw_data = self.kt.get_bytes(self.key, db=self.db)
+        if raw_data is not None:
+            return self.kt.deserialize_dict(raw_data, self.decode_values)
+    def set_raw(self, d):
+        data = self.kt.serialize_dict(d, self.encode_values)
+        return self.kt.set_bytes(self.key, data, db=self.db)
+
 
 class Set(Container):
     """
@@ -315,3 +324,11 @@ class List(Container):
 
     def __contains__(self, value):
         return self.find(value) is not None
+
+    def get_raw(self):
+        raw_data = self.kt.get_bytes(self.key, db=self.db)
+        if raw_data is not None:
+            return self.kt.deserialize_list(raw_data, self.decode_values)
+    def set_raw(self, l):
+        data = self.kt.serialize_list(l, self.encode_values)
+        return self.kt.set_bytes(self.key, data, db=self.db)

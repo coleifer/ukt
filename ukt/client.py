@@ -360,15 +360,25 @@ class KyotoTycoon(object):
             self._script_runner = ScriptRunner(self)
         return self._script_runner
 
-    def serialize_dict(self, d):
+    def serialize_dict(self, d, encode_values=True):
+        if encode_values:
+            d = {key: self.encode_value(value) for key, value in d.items()}
         return _serialize_dict(d)
     def deserialize_dict(self, data, decode_values=True):
-        return _deserialize_dict(data, decode_values)
+        d = _deserialize_dict(data, False)
+        if d and decode_values:
+            d = {key: self.decode_value(value) for key, value in d.items()}
+        return d
 
-    def serialize_list(self, l):
+    def serialize_list(self, l, encode_values=True):
+        if encode_values:
+            l = [self.encode_value(value) for value in l]
         return _serialize_list(l)
     def deserialize_list(self, data, decode_values=True):
-        return _deserialize_list(data, decode_values)
+        l = _deserialize_list(data, False)
+        if l and decode_values:
+            l = [self.decode_value(value) for value in l]
+        return l
 
     @contextmanager
     def ctx(self, http=False):
@@ -588,6 +598,9 @@ class KyotoTycoon(object):
         """
         return self.set_bulk({key: value}, db, expire_time, no_reply,
                              encode_value)
+
+    def set_bytes(self, key, value, db=None, expire_time=None, no_reply=False):
+        return self.set(key, value, db, expire_time, no_reply, False)
 
     def remove_bulk(self, keys, db=None, no_reply=False):
         """
