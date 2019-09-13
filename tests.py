@@ -1739,6 +1739,37 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(l.insert(-1, 'nug'), 2)
         self.assertEqual(l[:], ['nug', 'baz'])
 
+    def test_list_poppush(self):
+        l1 = self.db.List('l1')
+        l2 = self.db.List('l2')
+
+        def assertLists(l1_val, l2_val):
+            self.assertEqual(list(l1), l1_val)
+            self.assertEqual(list(l2), l2_val)
+
+        l1.extend(['i0', 'i1', 'i2', 'i3'])
+        self.assertEqual(l1.lpoprpush(l2), 'i0')
+        assertLists(['i1', 'i2', 'i3'], ['i0'])
+
+        self.assertEqual(l1.rpoplpush(l2), 'i3')
+        assertLists(['i1', 'i2'], ['i3', 'i0'])
+
+        self.assertEqual(l1.lpoprpush('l2'), 'i1')
+        self.assertEqual(l1.rpoplpush('l2'), 'i2')
+        self.assertRaises(IndexError, l1.lpoprpush, l2)
+        self.assertRaises(IndexError, l1.rpoplpush, l2)
+        assertLists([], ['i2', 'i3', 'i0', 'i1'])
+
+        # Test rotate.
+        self.assertEqual(l2.lpoprpush(), 'i2')
+        assertLists([], ['i3', 'i0', 'i1', 'i2'])
+        self.assertEqual(l2.rpoplpush(), 'i2')
+        assertLists([], ['i2', 'i3', 'i0', 'i1'])
+
+        # Can't rotate an empty list.
+        self.assertRaises(IndexError, l1.lpoprpush, l1)
+        self.assertRaises(IndexError, l1.rpoplpush, l1)
+
     def test_list_unpack(self):
         l = self.db.List('l1')
         l.extend(['i%s' % i for i in range(10)])

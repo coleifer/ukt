@@ -276,6 +276,23 @@ class List(Container):
         else:
             return self.popright()
 
+    def _poppush(self, cmd, dest):
+        if dest is None:
+            dest = self.key
+        elif isinstance(dest, List):
+            dest = dest.key
+        out = self.lua(cmd, raw_data={'dest': dest}, decode=True)
+        try:
+            return out['value']
+        except KeyError:
+            raise IndexError('no data in source')
+
+    def lpoprpush(self, dest=None):
+        return self._poppush('llpoprpush', dest)
+
+    def rpoplpush(self, dest=None):
+        return self._poppush('lrpoplpush', dest)
+
     def length(self):
         out = self.lua('llen', decode=False)
         return int(out[b'num'])

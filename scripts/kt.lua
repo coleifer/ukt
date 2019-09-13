@@ -828,6 +828,116 @@ function lrpop(inmap, outmap)
 end
 
 
+function _lpoppush(inmap, outmap, operation)
+  local src = inmap.key
+  local dest = inmap.dest
+  if not src or not dest then
+    kt.log("system", "list function missing required: 'key' or 'dest'")
+    return kt.RVEINVALID
+  end
+
+  local db = _select_db(inmap) -- Allow db to be specified as argument.
+  local item
+  local ok = false
+
+  if src == dest then
+    local function visit(key, value, xt)
+      if not value then
+        return kt.NOP
+      end
+
+      local value_array = kt.arrayload(value)
+      local n = #value_array
+
+      if n == 0 then
+        -- Account for the possibility that the serialized value is non-empty,
+        -- but the list itself is empty.
+        return kt.NOP
+      end
+
+      if operation == 1 then
+        -- RPOPLPUSH, move tail to head.
+        item = value_array[n]
+        value_array[n] = nil
+        table.insert(value_array, 1, item)
+      else
+        -- LPOPRPUSH, move head to tail.
+        item = value_array[1]
+        table.remove(value_array, 1)
+        table.insert(value_array, item)
+      end
+
+      return kt.arraydump(value_array), xt
+    end
+    ok = db:accept(src, visit)
+  else
+    local function visit(key, value, xt)
+      -- Either we have no item to pop, or we have no item to write.
+      if (key == src and not value) or (key == dest and not item) then
+        return kt.NOP
+      end
+
+      local value_array = {}
+      if value then value_array = kt.arrayload(value) end
+
+      if key == src then
+        local n = #value_array
+        if n == 0 then
+          -- Serialized list is empty, nothing to do.
+          return kt.NOP
+        end
+        if operation == 1 then
+          -- RPOPLPUSH, move tail to head.
+          item = value_array[n]
+          value_array[n] = nil
+        else
+          -- LPOPRPUSH, move head to tail.
+          item = value_array[1]
+          table.remove(value_array, 1)
+        end
+      else
+        if operation == 1 then
+          -- RPOPLPUSH.
+          table.insert(value_array, 1, item)
+        else
+          -- LPOPRPUSH.
+          table.insert(value_array, item)
+        end
+      end
+      return kt.arraydump(value_array), xt
+    end
+    ok = db:accept_bulk({ src, dest }, visit)
+  end
+
+  if ok then
+    outmap.value = item
+    return kt.RVSUCCESS
+  else
+    return kt.RVELOGIC
+  end
+end
+
+
+-- Redis-like RPOPLPUSH -- returns and removes the tail element from the list
+-- and pushes it to the head of the destination list. If source and dest are
+-- the same, then it is equivalent to a rotation.
+-- accepts: { key, dest }
+-- returns: { value }
+function lrpoplpush(inmap, outmap)
+  return _lpoppush(inmap, outmap, 1)
+end
+
+
+-- LPOPRPUSH -- returns and removes the head element from the list and pushes
+-- it to the tail of the destination list. If source and dest are the same,
+-- then it is equivalent to a rotation.
+-- accepts: { key, dest }
+-- returns: { value }
+function llpoprpush(inmap, outmap)
+  return _lpoppush(inmap, outmap, 2)
+end
+
+
 -- LREM -- remove an item by index.
 -- accepts: { key, index }
 -- returns: { value }
