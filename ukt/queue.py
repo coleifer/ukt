@@ -34,12 +34,14 @@ class Queue(object):
         return int(self._lua('queue_madd', raw_data, value_data)[b'num'])
 
     def _item_list(self, fn, n=1, timeout=None, value_data=None,
-                   min_score=None):
+                   min_score=None, dest=None):
         raw_data = {'n': n}
         if timeout is not None:
             raw_data['timeout'] = timeout
         if min_score is not None:
             raw_data['min_score'] = min_score
+        if dest is not None:
+            raw_data['dest'] = dest
 
         items = self._lua(fn, raw_data, value_data)
         if n == 1:
@@ -86,6 +88,10 @@ class Queue(object):
         raw_data = {'score': score, 'n': -1 if n is None else n}
         value_data = {'data': data}
         return int(self._lua('queue_set_score', raw_data, value_data)[b'num'])
+
+    def transfer(self, dest, n=1):
+        if isinstance(dest, Queue): dest = dest._key
+        return self._item_list('queue_transfer', n, dest=dest)
 
     def clear(self):
         return int(self._lua('queue_clear')[b'num'])

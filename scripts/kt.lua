@@ -1312,6 +1312,73 @@ function _qfn(inmap, outmap, required, fn)
 end
 
 
+-- dequeue and return up to n items, transferring them one queue to another.
+-- accepts: { queue, dest, n=1, db=0 }
+-- returns { idx: item, ... }
+function queue_transfer(inmap, outmap)
+  local fn = function(db, i, o)
+    -- Source and destination queues.
+    local queue = i.queue
+    local dest = i.dest
+    if queue == dest then
+      kt.log("system", "source and dest cannot be the same")
+      return kt.RVELOGIC
+    end
+
+    local n = tonumber(inmap.n) or 1
+    local num = 0
+    local key = string.format("%s\t", queue)
+    local pattern = string.format("^%s\t", queue)
+    local score_start = string.len(queue) + 2  -- First byte after "\t".
+    local score_end = score_start + 11  -- read 12 bytes.
+
+    -- Start processing at the head of the source queue.
+    local cursor = db:cursor()
+
+    -- No data, we're done.
+    if not cursor:jump(key) then
+      cursor:disable()
+      return kt.RVSUCCESS
+    end
+
+    local k, v, xt, incr
+
+    while n ~= 0 do
+      -- Retrieve the key, value and xt from the cursor. If the cursor is
+      -- invalidated then nil is returned.
+      k, v, xt = cursor:get()
+      if not k then break end
+
+      -- If this is not a queue item key, we are done.
+      if not k:match(pattern) then break end
+
+      -- Add item to the outmap, returning value to user.
+      o[tostring(num)] = v
+
+      -- Generate dest key, preserving the score of source key.
+      local dest_id = db:increment_double(dest, 1)
+      local score = tonumber(string.sub(k, score_start, score_end))
+      local dest_key = string.format("%s\t%012d%012d", dest, score, dest_id)
+
+      -- Add the item to the dest queue and remove from the source queue.
+      if not db:add(dest_key, v) then
+        kt.log("info", "could not add key, already exists")
+        cursor:disable()
+        return kt.RVELOGIC
+      else
+        cursor:remove()
+      end
+
+      num = num + 1
+      n = n - 1
+    end
+
+    cursor:disable()
+  end
+  return _qfn(inmap, outmap, {"queue", "dest"}, fn)
+end
+
+
 -- add/enqueue data to a queue
 -- accepts: { queue, data, score, db }
 -- returns { id }

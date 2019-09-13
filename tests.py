@@ -2209,6 +2209,51 @@ class TestLuaQueue(BaseLuaTestCase):
         self.assertEqual(q.peek(3, 2), ['i2'])
         self.assertEqual(q.rpeek(3, 2), ['i2'])
 
+    def test_queue_transfer(self):
+        qa, qb, qc = [self.db.Queue(k) for k in ('qa', 'qb', 'qc')]
+        def assertQ(a=None, b=None, c=None):
+            self.assertEqual(qa.peek(10), a or [])
+            self.assertEqual(qb.peek(10), b or [])
+            self.assertEqual(qc.peek(10), c or [])
+
+        qb.extend(['i0', 'i1', 'i2', 'i3'])
+        self.assertEqual(qb.transfer(qa, 2), ['i0', 'i1'])
+        assertQ(['i0', 'i1'], ['i2', 'i3'], [])
+
+        self.assertEqual(qb.transfer(qc, 1), 'i2')
+        assertQ(['i0', 'i1'], ['i3'], ['i2'])
+
+        self.assertEqual(qc.transfer('qa', 2), ['i2'])
+        assertQ(['i0', 'i1', 'i2'], ['i3'], [])
+
+        self.assertEqual(qc.transfer('qb', 1), None)
+        self.assertEqual(qc.transfer('qb', 2), [])
+        assertQ(['i0', 'i1', 'i2'], ['i3'], [])
+
+        self.assertEqual(qb.transfer(qa), 'i3')
+        assertQ(['i0', 'i1', 'i2', 'i3'], [], [])
+
+        self.assertEqual(qa.rpop(2), ['i3', 'i2'])
+
+        # Verify scores are preserved.
+        for i in range(5, 0, -1):
+            qb.add('i-%s' % i, i)  # i-5, i-4, i-3, i-2, i-1.
+        assertQ(['i0', 'i1'], ['i-5', 'i-4', 'i-3', 'i-2', 'i-1'], [])
+
+        self.assertEqual(qb.transfer(qa, 2), ['i-5', 'i-4'])
+        self.assertEqual(qb.transfer(qc, 2), ['i-3', 'i-2'])
+        assertQ(['i-5', 'i-4', 'i0', 'i1'], ['i-1'], ['i-3', 'i-2'])
+
+        self.assertEqual(qa.transfer(qc, 3), ['i-5', 'i-4', 'i0'])
+        assertQ(['i1'], ['i-1'], ['i-5', 'i-4', 'i-3', 'i-2', 'i0'])
+
+        self.assertEqual(qc.transfer(qb, 1000),
+                         ['i-5', 'i-4', 'i-3', 'i-2', 'i0'])
+        assertQ(['i1'], ['i-5', 'i-4', 'i-3', 'i-2', 'i-1', 'i0'], [])
+
+        self.assertEqual(qa.transfer(qb), 'i1')
+        assertQ([], ['i-5', 'i-4', 'i-3', 'i-2', 'i-1', 'i0', 'i1'], [])
+
 
 class TestLuaSerializers(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')

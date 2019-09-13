@@ -887,6 +887,18 @@ Kyoto Tycoon client
 
         Remove one or more items by value, starting from the end of the queue.
 
+    .. py:method:: transfer(dest, n=1)
+
+        :param dest: destination queue key or :py:class:`Queue` instance.
+        :param int n: number of items to transfer.
+        :return: either the item that was transferred or the list of items
+            that was transferred, depending on ``n``.
+
+        Transfer items from the head of the queue to the tail of the
+        destination queue. Priority scores are preserved. If the source queue
+        is empty, then either ``None`` or an empty list will be returned
+        (depending on whether ``n=1``).
+
     .. py:method:: set_priority(data, score, n=None)
 
         :param data: value to remove from end of queue.
