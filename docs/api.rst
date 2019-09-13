@@ -946,6 +946,360 @@ Kyoto Tycoon client
         score.
 
 
+Container types
+---------------
+
+Simple container types that emulate Python or Redis types, and rely on Kyoto
+Tycoon's lua serialization helpers. Behind-the scenes, these types are using
+lua functions to read the entire value into a Lua table and write it back.
+Because the full data must be deserialized for reading, and re-serialized for
+writing, all operations are O(n).
+
+These container types support transparent serialization using the configured
+serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
+
+.. py:class:: Hash(kt, key, encode_values=True, decode_values=True, db=None)
+
+    :param KyotoTycoon kt: client
+    :param str key: key to store hash data
+    :param bool encode_values: values should be serialized using the configured
+        serializer (e.g., KT_PICKLE, KT_MSGPACK, etc).
+    :param bool decode_values: values should be deserialized using the
+        configured serializer.
+    :param int db: database index to store hash. If not specified, will use the
+        default db configured for the kt client.
+
+    .. py:method:: set_bulk(__data=None, **kwargs)
+
+        :param dict __data: provide data as a dictionary.
+        :param kwargs: or provide data keyword arguments.
+        :return: number of keys that were set.
+
+        Update the data stored in the hash.
+
+    .. py:method:: get_bulk(keys)
+
+        :param keys: an iterable of keys to fetch.
+        :return: a dictionary of key/value pairs. If a requested key is not
+            found, it is not included in the returned data.
+
+    .. py:method:: remove_bulk(keys)
+
+        :param keys: an iterable of keys to remove.
+        :return: number of key/value pairs that were removed.
+
+    .. py:method:: get_all()
+
+        :return: dictionary of all data stored in the hash
+
+        A more efficient implementation utilizes the Python implementation of
+        the lua serializers. Use :py:meth:`Hash.get_raw`.
+
+    .. py:method:: set(key, value)
+
+        :param str key: key to store
+        :param value: data
+
+        Set a single key/value pair in the hash. Returns number of records
+        written (1).
+
+    .. py:method:: setnx(key, value)
+
+        :param str key: key to store
+        :param value: data
+        :return: 1 on success, 0 if key already exists.
+
+        Set a single key/value pair in the hash only if the key does not
+        already exist.
+
+    .. py:method:: get(key)
+
+        :param str key: key to fetch
+        :return: value, if key exists, or ``None``.
+
+    .. py:method:: remove(key)
+
+        :param str key: key to remove
+        :return: number of keys removed, 1 on success, 0 if key not found.
+
+    .. py:method:: length()
+
+        :return: total number of keys in the hash.
+
+    .. py:method:: contains(key)
+
+        :param str key: key to check
+        :return: boolean indicating whether the given key exists.
+
+    .. py:method:: unpack(prefix=None)
+
+        :param str prefix: prefix for unpacked-keys
+        :return: number of keys that were written
+
+        Unpack the key/value pairs in the hash into top-level key/value pairs
+        in the database, optionally prefixing the unpacked keys with the given
+        prefix.
+
+    .. py:method:: pack(start=None, stop=None, count=None)
+
+        :param str start: start key, or will be first key in the database
+        :param str stop: stop key, or will be last key in the database
+        :param int count: limit number of keys to pack
+        :return: number of keys that were packed
+
+        Pack a range of key/value pairs in the database into a hash.
+
+    .. py:method:: pack_keys(key)
+
+        :param str key: destination key for :py:class:`List` of keys.
+        :return: number of keys that were written to the list
+
+        Pack the keys of the hash into a :py:class:`List` at the given key.
+
+    .. py:method:: pack_values(key)
+
+        :param str key: destination key for :py:class:`List` of values.
+        :return: number of values that were written to the list
+
+        Pack the values of the hash into a :py:class:`List` at the given key.
+
+    .. py:method:: __len__()
+
+        See :py:meth:`~Hash.length`.
+
+    .. py:method:: __contains__()
+
+        See :py:meth:`~Hash.contains`.
+
+    .. py:method:: __getitem__()
+
+        See :py:meth:`~Hash.get`.
+
+    .. py:method:: __setitem__()
+
+        See :py:meth:`~Hash.set`.
+
+    .. py:method:: __detitem__()
+
+        See :py:meth:`~Hash.remove`.
+
+    .. py:method:: update(__data=None, **kwargs)
+
+        See :py:meth:`~Hash.set_bulk`.
+
+    .. py:method:: get_raw()
+
+        :return: dictionary of all data stored in hash, or ``None`` if empty.
+
+        Utilize a more-efficient implementation for fetching all data stored in
+        the hash. Rather than going through Lua, we read the raw value of the
+        serialized hash, then deserialize it using an equivalent format to KT's
+        internal ``mapload`` format.
+
+    .. py:method:: set_raw(d)
+
+        :param dict d: dictionary of all data to store in hash.
+
+        Utilize a more-efficient implementation for setting the data stored in
+        the hash. Rather than going through Lua, we write the raw value of the
+        serialized hash, using an equivalent format to KT's internal
+        ``mapdump`` format.
+
+
+.. py:class:: List(kt, key, encode_values=True, decode_values=True, db=None)
+
+    :param KyotoTycoon kt: client
+    :param str key: key to store list data
+    :param bool encode_values: values should be serialized using the configured
+        serializer (e.g., KT_PICKLE, KT_MSGPACK, etc).
+    :param bool decode_values: values should be deserialized using the
+        configured serializer.
+    :param int db: database index to store list. If not specified, will use the
+        default db configured for the kt client.
+
+    .. py:method:: appendleft(value)
+
+        :param value: value to append to left-side (head) of list.
+        :return: length of list after operation.
+
+    .. py:method:: appendright(value)
+
+        :param value: value to append to right-side (tail) of list.
+        :return: length of list after operation.
+
+    .. py:method:: append(value)
+
+        Alias for :py:meth:`~List.appendright`.
+
+    .. py:method:: extend(values)
+
+        :param values: an iterable of values to add to the tail of the list.
+        :return: length of list after operation.
+
+    .. py:method:: get_range(start=None, stop=None)
+
+        :param int start: start index (0 for first element)
+        :param int stop: stop index. Supports negative values.
+        :return: a list of items corresponding to the given range.
+
+        Slicing operation equivalent to Python's list slice behavior. If the
+        start or stop indices are out-of-bounds, the return value will be an
+        empty list.
+
+    .. py:method:: index(index)
+
+        :param int index: item index to fetch. Supports negative values.
+        :return: the value at the given index
+
+        Indexing operation equivalent to Python's list item lookup. If the
+        index is out-of-bounds, an :py:class:`IndexError` will be raised.
+
+    .. py:method:: insert(index, value)
+
+        :param int index: index at which new value should be inserted. Supports
+            negative values.
+        :param value: value to insert
+        :return: length of list after operation
+
+        Insert an item into the list at the given index. If the index is
+        out-of-bounds, an :py:class:`IndexError` will be raised.
+
+    .. py:method:: remove(index)
+
+        :param int index: item index to remove. Supports negative values.
+        :return: the value at the given index
+
+        Remove and return an item from the list by index. If the index is
+        out-of-bounds, an :py:class:`IndexError` will be raised.
+
+    .. py:method:: remove_range(start=None, stop=None)
+
+        :param int start: start index to remove. Supports negative values.
+        :param int stop: stop index of range to remove. Supports negative
+            values.
+        :return: length of list after operation
+
+        Remove a range of values by index.
+
+    .. py:method:: popleft()
+
+        :return: item at head of list or ``None`` if list is empty.
+
+    .. py:method:: popright()
+
+        :return: item at tail of list or ``None`` if list is empty.
+
+    .. py:method:: pop(index=None)
+
+        :param int index: index to pop (optional), or ``None`` to remove the
+            item at the tail of the list.
+        :return: item removed or ``None`` if list is empty or the index is
+            out-of-bounds.
+
+    .. py:method:: lpoprpush(dest=None)
+
+        :param dest: destination key (or :py:class:`List` object). If
+            unspecified, the destination will be the current list and the
+            operation is equivalent to a rotation.
+        :return: item that was moved, if source is not empty. If source list is
+            empty, an :py:class:`IndexError` is raised.
+
+        Pop the item at the head of the current list and push it to the tail of
+        the dest list.
+
+    .. py:method:: rpoplpush(dest=None)
+
+        :param dest: destination key (or :py:class:`List` object). If
+            unspecified, the destination will be the current list and the
+            operation is equivalent to a rotation.
+        :return: item that was moved, if source is not empty. If source list is
+            empty, an :py:class:`IndexError` is raised.
+
+        Pop the item at the tail of the current list and push it to the head of
+        the dest list.
+
+    .. py:method:: length()
+
+        :return: length of the list.
+
+    .. py:method:: set(index, value)
+
+        :param int index: index to set. Supports negative values.
+        :param value: value to set at given index
+
+        Set the value at the given index. If the index is out-of-bounds, an
+        :py:class:`IndexError` will be raised.
+
+    .. py:method:: find(value)
+
+        :param value: value to search for
+        :return: index of first occurrance of value starting from head of list.
+
+    .. py:method:: rfind(value)
+
+        :param value: value to search for
+        :return: index of first occurrance of value starting from tail of list.
+
+    .. py:method:: unpack(start=None, stop=None, prefix=None, fmt=None)
+
+        :param int start: start index of range to unpack
+        :param int stop: stop index of range to unpack
+        :param str prefix: prefix for output values
+        :param str fmt: lua format-string for index, e.g. `'%08d'`.
+
+        Unpack the items in the list into top-level keys in the database. The
+        key will begin with the provided prefix, and optionally accepts a
+        format-string for formatting the index.
+
+    .. py:method:: pack(start=None, stop=None, count=None)
+
+        :param str start: start key, or will be first key in the database
+        :param str stop: stop key, or will be last key in the database
+        :param int count: limit number of keys to pack
+        :return: number of keys that were packed
+
+        Pack the values for a range of keys in the database into a list.
+
+    .. py:method:: __len__()
+
+        See :py:meth:`~List.length`.
+
+    .. py:method:: __contains__()
+
+        See :py:meth:`~List.find`.
+
+    .. py:method:: __getitem__()
+
+        Supports item indexes or slices. See :py:meth:`~List.index` and
+        :py:meth:`~List.get_range`.
+
+    .. py:method:: __setitem__()
+
+        See :py:meth:`~List.set`.
+
+    .. py:method:: __detitem__()
+
+        See :py:meth:`~List.remove`.
+
+    .. py:method:: get_raw()
+
+        :return: list of all data stored in list, or ``None`` if empty.
+
+        Utilize a more-efficient implementation for fetching all data stored in
+        the list. Rather than going through Lua, we read the raw value of the
+        serialized list, then deserialize it using an equivalent format to KT's
+        internal ``arrayload`` format.
+
+    .. py:method:: set_raw(l)
+
+        :param list l: list of all data to store in list.
+
+        Utilize a more-efficient implementation for setting the data stored in
+        the list. Rather than going through Lua, we write the raw value of the
+        serialized list, using an equivalent format to KT's internal
+        ``arraydump`` format.
+
+
 Embedded Servers
 ----------------
 
