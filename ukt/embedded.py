@@ -59,21 +59,15 @@ class EmbeddedServer(object):
             '-port',
             str(port)] + self._server_args + [self._database]
 
-        while not self._server_terminated.is_set():
-            if self._quiet:
-                out, err = subprocess.PIPE, subprocess.PIPE
-            else:
-                out, err = sys.__stdout__.fileno(), sys.__stderr__.fileno()
-            self._server_p = subprocess.Popen(command, stderr=err, stdout=out)
+        if self._quiet:
+            out, err = subprocess.PIPE, subprocess.PIPE
+        else:
+            out, err = sys.__stdout__.fileno(), sys.__stderr__.fileno()
+        self._server_p = subprocess.Popen(command, stderr=err, stdout=out)
 
-            self._server_started.set()
-            self._server_p.wait()
-            self._client = None
-
-            time.sleep(0.1)
-            if not self._server_terminated.is_set():
-                logger.error('server process died, restarting...')
-
+        self._server_started.set()
+        self._server_p.wait()
+        self._client = None
         logger.info('server shutdown')
 
     def _stop_server(self, wait=False):

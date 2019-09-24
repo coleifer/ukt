@@ -2541,7 +2541,7 @@ class TestConnectionError(unittest.TestCase):
         self.db = self.server.client
 
     def tearDown(self):
-        self.server.stop()
+        self.server.stop(wait=True)
         self.db.close_all()
 
     def test_connection_error(self):
