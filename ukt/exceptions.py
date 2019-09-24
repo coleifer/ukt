@@ -16,3 +16,6 @@ class ServerError(KTError): pass
 
 # Indicate time-out waiting for signal.
 class SignalTimeout(KTError): pass
+
+# Error in replication client.
+class ReplicationError(KTError): pass
