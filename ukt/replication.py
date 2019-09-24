@@ -24,6 +24,19 @@ struct_q = struct.Struct('>Q')
 
 
 class ReplicationClient(object):
+    """
+    Replication client implementation.
+
+    Receive update logs from a running kyoto tycoon server. Allows
+    implementation of custom replication handler, e.g. key filtering or
+    pushing change notifications to an external service.
+
+    :param KyotoTycoon kt: client
+    :param int sid: replication client's server id (if unspecified will use a
+        random integer between 100 - 199.
+    :param bool decode_values: attempt to decode values for SET operations
+        using the configured serializer.
+    """
     def __init__(self, kt, sid=None, decode_values=True):
         self.kt = kt
         self.sid = sid or random.randint(100, 199)
@@ -32,6 +45,26 @@ class ReplicationClient(object):
         self._finished = threading.Event()
 
     def run(self, timestamp=None):
+        """
+        Returns a generator that yields update-log messages.
+
+        Each message is a `dict` with (at least) the following keys:
+
+        * sid - server id where change originated
+        * db - database index
+        * op - one of REPL_SET, REPL_REMOVE, REPL_CLEAR
+
+        REPL_REMOVE operations additionally include the key being removed. Note
+        that the remove message is sent regardless of whether the requested key
+        existed.
+
+        REPL_SET operations include the key being set, the value, and the
+        expiration time (xt). If no expiration time was set, then the xt value
+        will be 0xffffffffff. Otherwise it is a unix timestamp.
+
+        Multi-key operations such as remove_bulk or set_bulk will result in one
+        update-log per item.
+        """
         if self._running:
             return False
 
@@ -113,6 +146,14 @@ class ReplicationClient(object):
         return (0, data)
 
     def stop(self, wait=False):
+        """
+        Stop the replication client.
+
+        :param bool wait: wait for running replication client to finish. This
+            should ONLY be specified if the replication client is running in a
+            separate thread. Otherwise the call will deadlock.
+        :return: bool indicating success.
+        """
         if not self._running:
             return False
         self._running = False
