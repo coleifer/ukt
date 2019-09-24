@@ -644,7 +644,7 @@ class KyotoTycoon(object):
             buf = io.BytesIO()
             buf.write(REMOVE_BULK)
             buf.write(struct_i.pack(NO_REPLY if no_reply else 0))
-            buf.write(struct_i.pack(len(keys)))
+            buf.write(struct_i.pack(len(db_key_list)))
             for db, key in db_key_list:
                 bkey = encode(key)
                 buf.write(struct_hi.pack(db, len(bkey)))
