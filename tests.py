@@ -2577,10 +2577,12 @@ class TestReplicationClient(BaseTestCase):
     def test_replication_client(self):
         rc = ReplicationClient(self.db, 100)
         accum = []
+        evt = threading.Event()
 
         def run_rc():
             i = 0
             log_gen = rc.run()
+            evt.set()
             for log in log_gen:
                 i += 1
                 accum.append(log)
@@ -2594,6 +2596,7 @@ class TestReplicationClient(BaseTestCase):
         # specifying the expire time via the SET operation is relative to the
         # current time.
         xt = 0xffffffffff
+        evt.wait()
 
         self.db.set('k1', 'v1')
         self.db.add('k2', 'v2', db=1)
@@ -2603,7 +2606,7 @@ class TestReplicationClient(BaseTestCase):
         self.db.remove_bulk_details([(0, 'k1'), (1, 'k2')])
         self.db.clear()
 
-        t.join()
+        t.join(timeout=5)
         self.assertEqual(accum, [
             {'sid': 9, 'db': 0, 'op': REPL_SET, 'key': 'k1', 'value': 'v1',
              'xt': xt},
