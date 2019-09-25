@@ -1,10 +1,15 @@
 import datetime
 import io
+import os
 import random
 import struct
+import sys
+import tempfile
 import threading
 import time
+import unittest
 
+from ukt.embedded import EmbeddedServer
 from ukt.exceptions import ProtocolError
 from ukt.exceptions import ReplicationError
 from ukt.exceptions import ServerError
@@ -165,3 +170,76 @@ class ReplicationClient(object):
             # thread! Otherwise the code will dead-lock.
             self._finished.wait()
         return True
+
+
+class TestReplicationServer(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        ulog_dir = tempfile.mkdtemp(prefix='ukt-ulog')
+        server_args = [
+            '-le',
+            '-sid', '9',
+            '-scr',
+            os.path.join(os.path.dirname(__file__), '../scripts/kt.lua'),
+            '-ulog', ulog_dir,
+            '%']
+        cls._server = EmbeddedServer(database='%', server_args=server_args)
+        cls._server.run()
+        cls.db = cls._server.client
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._server is not None:
+            cls._server.stop()
+            cls.db.close_all()
+            cls.db = None
+
+    def tearDown(self):
+        if self.db is not None:
+            self.db.clear()
+
+    def test_replication_client(self):
+        accum = []
+        evt = threading.Event()
+        ts = int(time.time()) - 60  # Ensure all operations are replicated.
+
+        def run_replication():
+            rc = ReplicationClient(self.db, sid=100)
+            i = 0
+            log_gen = rc.run(ts)
+            evt.set()
+            for log in log_gen:
+                i += 1
+                accum.append(log)
+                if i == 6:
+                    rc.stop()
+
+        t = threading.Thread(target=run_replication)
+        t.daemon = True
+        t.start()
+        evt.wait()
+
+        xt = 0xffffffffff
+        self.db.set('k1', 'v1')
+        self.db.add('k2', 'v2', db=1, expire_time=ts + 300)
+        self.db.replace('k2', 'v2-x', db=1)
+        self.db.add('k1', 'v1-y')  # No operation.
+        self.db.replace('k2', 'v2')  # No operation.
+        self.db.remove_bulk_details([(0, 'k1'), (1, 'k2')])
+        self.db.clear()
+
+        t.join(timeout=5)
+        self.assertEqual(accum, [
+            {'sid': 9, 'db': 0, 'op': REPL_SET, 'key': 'k1', 'value': 'v1',
+             'xt': xt},
+            {'sid': 9, 'db': 1, 'op': REPL_SET, 'key': 'k2', 'value': 'v2',
+             'xt': ts + 300},
+            {'sid': 9, 'db': 1, 'op': REPL_SET, 'key': 'k2', 'value': 'v2-x',
+             'xt': xt},
+            {'sid': 9, 'db': 0, 'op': REPL_REMOVE, 'key': 'k1'},
+            {'sid': 9, 'db': 1, 'op': REPL_REMOVE, 'key': 'k2'},
+            {'sid': 9, 'db': 0, 'op': REPL_CLEAR}])
+
+
+if __name__ == '__main__':
+    unittest.main(argv=sys.argv)
