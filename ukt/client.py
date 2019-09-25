@@ -21,6 +21,7 @@ import re
 import socket
 import struct
 import sys
+import threading
 import time
 
 try:
@@ -70,6 +71,7 @@ from ukt.serializer import _serialize_list
 
 
 num_re = re.compile('-?\d+')
+xt_cutoff = 86400 * 180
 
 quote_b = partial(quote_from_bytes, safe='')
 unquote_b = partial(unquote_to_bytes)
@@ -80,6 +82,19 @@ def decode_from_content_type(content_type):
         return b64decode
     elif content_type.endswith('colenc=U'):
         return unquote_b
+
+def convert_xt(xt):
+    if xt is None:
+        return EXPIRE
+    elif isinstance(xt, datetime.datetime):
+        return -time.mktime(xt.timetuple())
+    elif isinstance(xt, (int, float)) and xt >= xt_cutoff:
+        # Negative expire-times are treated as timestamps. Otherwise, they are
+        # treated as relative to current time.
+        return -xt
+    elif isinstance(xt, datetime.timedelta):
+        return xt.total_seconds()
+    return xt
 
 
 READSIZE = 1024 * 4
@@ -187,6 +202,7 @@ class Pool(object):
         self.free = []
         self.in_use_http = {}
         self.free_http = []
+        self._lock = threading.RLock()
 
     @property
     def stats(self):
@@ -217,49 +233,52 @@ class Pool(object):
             constructor = self.create_socket
 
         threshold = time.time() - self.max_age
-        while free_list:
-            ts, sock = heapq.heappop(free_list)
-            if ts > threshold:
-                in_use[sock] = ts
-                return sock
-            else:
-                sock.close()
+        with self._lock:
+            while free_list:
+                ts, sock = heapq.heappop(free_list)
+                if ts > threshold:
+                    in_use[sock] = ts
+                    return sock
+                else:
+                    sock.close()
 
-        sock = constructor()
-        in_use[sock] = time.time()
-        return sock
+            sock = constructor()
+            in_use[sock] = time.time()
+            return sock
 
     def checkin(self, sock, http=False):
         threshold = time.time() - self.max_age
-        if http:
-            ts = self.in_use_http.pop(sock)
-            if ts < threshold:
-                sock.close()
-            elif sock.sock is not None:
-                heapq.heappush(self.free_http, (ts, sock))
-        else:
-            ts = self.in_use.pop(sock)
-            if ts < threshold:
-                sock.close()
-            elif not sock.is_closed:
-                heapq.heappush(self.free, (ts, sock))
+        with self._lock:
+            if http:
+                ts = self.in_use_http.pop(sock)
+                if ts < threshold:
+                    sock.close()
+                elif sock.sock is not None:
+                    heapq.heappush(self.free_http, (ts, sock))
+            else:
+                ts = self.in_use.pop(sock)
+                if ts < threshold:
+                    sock.close()
+                elif not sock.is_closed:
+                    heapq.heappush(self.free, (ts, sock))
 
     def disconnect(self):
         n = 0
-        free_sockets = itertools.chain(self.free, self.free_http)
-        for _, sock in free_sockets:
-            sock.close()
-            n += 1
+        with self._lock:
+            free_sockets = itertools.chain(self.free, self.free_http)
+            for _, sock in free_sockets:
+                sock.close()
+                n += 1
 
-        in_use_sockets = itertools.chain(self.in_use, self.in_use_http)
-        for sock in in_use_sockets:
-            sock.close()
-            n += 1
+            in_use_sockets = itertools.chain(self.in_use, self.in_use_http)
+            for sock in in_use_sockets:
+                sock.close()
+                n += 1
 
-        self.free = []
-        self.free_http = []
-        self.in_use = {}
-        self.in_use_http = {}
+            self.free = []
+            self.free_http = []
+            self.in_use = {}
+            self.in_use_http = {}
 
         return n
 
@@ -518,7 +537,7 @@ class KyotoTycoon(object):
 
         :param dict data: a mapping of key to value.
         :param int db: database index.
-        :param long expire_time: expire time in seconds from now.
+        :param expire_time: expire time in seconds from now.
         :param bool no_reply: do not receive a response.
         :param bool encode_values: serialize values before writing.
         :return: number of records written.
@@ -526,8 +545,7 @@ class KyotoTycoon(object):
         with self.ctx() as sock:
             if db is None:
                 db = self.default_db
-            if expire_time is None:
-                expire_time = EXPIRE
+            expire_time = convert_xt(expire_time)
 
             buf = io.BytesIO()
             buf.write(SET_BULK)
@@ -573,8 +591,7 @@ class KyotoTycoon(object):
                     bval = self.encode_value(value)
                 else:
                     bval = encode(value)
-                if xt is None:
-                    xt = EXPIRE
+                xt = convert_xt(xt)
                 buf.write(struct_dbkvxt.pack(db, len(bkey), len(bval), xt))
                 buf.write(bkey)
                 buf.write(bval)
@@ -593,7 +610,7 @@ class KyotoTycoon(object):
         :param key: key.
         :param value: value to store.
         :param int db: database index.
-        :param long expire_time: expire time in seconds from now.
+        :param expire_time: expire time in seconds from now.
         :param bool no_reply: do not receive a response.
         :param bool encode_value: serialize value before writing.
         :return: number of records written (1).
@@ -947,14 +964,14 @@ class KyotoTycoon(object):
 
         :param dict data: key/value mapping.
         :param int db: database index.
-        :param long expire_time: expire time in seconds.
+        :param expire_time: expire time in seconds.
         :param bool atomic: set all data in a single operation.
         :param bool encode_values: serialize values.
         :return: number of records set.
         """
         accum = {}
         if expire_time is not None:
-            accum['xt'] = str(expire_time)
+            accum['xt'] = str(convert_xt(expire_time))
         for key, value in data.items():
             if encode_values:
                 value = self.encode_value(value)
@@ -983,7 +1000,7 @@ class KyotoTycoon(object):
             value = self.encode_value(value)
         data = {'key': key, 'value': value}
         if expire_time is not None:
-            data['xt'] = str(expire_time)
+            data['xt'] = str(convert_xt(expire_time))
         resp, status = self._request('/%s' % cmd, data, db, (450,),
                                      decode_keys=False, **kw)
         return status != 450
@@ -996,7 +1013,7 @@ class KyotoTycoon(object):
         :param key: key.
         :param value: value to store.
         :param int db: database index.
-        :param long expire_time: expire time in seconds from now.
+        :param expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
         :return: True on success.
         """
@@ -1011,7 +1028,7 @@ class KyotoTycoon(object):
         :param key: key.
         :param value: value to store.
         :param int db: database index.
-        :param long expire_time: expire time in seconds from now.
+        :param expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
         :return: True on success.
         """
@@ -1026,7 +1043,7 @@ class KyotoTycoon(object):
         :param key: key.
         :param value: value to store.
         :param int db: database index.
-        :param long expire_time: expire time in seconds from now.
+        :param expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
         :return: True on success.
         """
@@ -1041,7 +1058,7 @@ class KyotoTycoon(object):
         :param key: key.
         :param value: value to append..
         :param int db: database index.
-        :param long expire_time: expire time in seconds from now.
+        :param expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
         :return: True on success.
         """
@@ -1056,14 +1073,14 @@ class KyotoTycoon(object):
         :param int n: amount to increment by.
         :param int orig: original value if key does not exist.
         :param int db: database index.
-        :param long expire_time: expire time in seconds from now.
+        :param expire_time: expire time in seconds from now.
         :return: value after increment.
         """
         data = {'key': key, 'num': str(n)}
         if orig is not None:
             data['orig'] = str(orig)
         if expire_time is not None:
-            data['xt'] = str(expire_time)
+            data['xt'] = str(convert_xt(expire_time))
         resp, status = self._request('/increment', data, db,
                                      decode_keys=False, **kw)
         return int(resp[b'num'])
@@ -1077,14 +1094,14 @@ class KyotoTycoon(object):
         :param float n: amount to increment by.
         :param float orig: original value if key does not exist.
         :param int db: database index.
-        :param long expire_time: expire time in seconds from now.
+        :param expire_time: expire time in seconds from now.
         :return: value after increment.
         """
         data = {'key': key, 'num': str(n)}
         if orig is not None:
             data['orig'] = str(orig)
         if expire_time is not None:
-            data['xt'] = str(expire_time)
+            data['xt'] = str(convert_xt(expire_time))
         resp, status = self._request('/increment_double', data, db,
                                      decode_keys=False, **kw)
         return float(resp[b'num'])
@@ -1098,7 +1115,7 @@ class KyotoTycoon(object):
         :param old_val: original value in database.
         :param new_val: new value for key.
         :param int db: database index.
-        :param long expire_time: expire time in seconds from now.
+        :param expire_time: expire time in seconds from now.
         :param bool encode_value: serialize value before writing.
         :return: True on success.
         """
@@ -1115,7 +1132,7 @@ class KyotoTycoon(object):
                 new_val = self.encode_value(new_val)
             data['nval'] = new_val
         if expire_time is not None:
-            data['xt'] = str(expire_time)
+            data['xt'] = str(convert_xt(expire_time))
 
         resp, status = self._request('/cas', data, db, (450,), **kw)
         return status != 450
@@ -1279,7 +1296,7 @@ class KyotoTycoon(object):
             value = self.encode_value(value)
         data = {'value': value}
         if expire_time is not None:
-            data['xt'] = str(expire_time)
+            data['xt'] = str(convert_xt(expire_time))
         if step:
             data['step'] = ''
         _, s = self._cursor_command('cur_set_value', cursor_id, data, **kw)
@@ -1453,7 +1470,7 @@ class KyotoTycoon(object):
         is returned.
 
         :param str key: key to update.
-        :param int xt: new expire time (or None).
+        :param xt: new expire time (or None).
         :param int db: database index.
         :return: old expire time or None if key not found.
         """
@@ -1469,13 +1486,13 @@ class KyotoTycoon(object):
         does not exist, then the key is omitted from the return value.
 
         :param list keys: keys to update.
-        :param int xt: new expire time (or None).
+        :param xt: new expire time (or None).
         :param int db: database index.
         :return: a dict of key -> old expire time.
         """
         data = {'db': self.default_db if db is None else db}
         for key in keys:
-            data[key] = str(xt or EXPIRE)
+            data[key] = str(convert_xt(xt))
         out = self.script('touch_bulk', data=data, encode_values=False,
                           decode_values=False)
         return {key: int(decode(value)) for key, value in out.items()}

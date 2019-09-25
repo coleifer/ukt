@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import datetime
 import functools
 import os
 import pickle
@@ -796,6 +797,41 @@ class TestLuaExpireTime(BaseLuaTestCase):
         xts = {k: (v, xt) for _, k, v, xt in res}
         self.assertEqual(xts, expected)
 
+    def test_expire_time_handling(self):
+        dt = datetime.datetime.now().replace(microsecond=0)
+        dt += datetime.timedelta(seconds=3600)
+        dt_ts = time.mktime(dt.timetuple())
+        xt = int(time.time()) + 600
+        xt_none = 0xffffffffff
+
+        # Set the expire time in a variety of ways.
+        self.db.set('k1', 'v1', expire_time=dt)
+        self.db.set_bulk_details([
+            (0, 'k2', 'v2', dt),
+            (0, 'k3', 'v3', xt),
+            (0, 'k4', 'v4', None)])
+        self.db.add('k5', 'v5', expire_time=dt)
+
+        self.assertXT(['k1', 'k2', 'k3', 'k4', 'k5'], {
+            'k1': ('v1', dt_ts),
+            'k2': ('v2', dt_ts),
+            'k3': ('v3', xt),
+            'k4': ('v4', xt_none),
+            'k5': ('v5', dt_ts)})
+
+        # Ensure relative times work as expected.
+        ts = int(time.time()) + 300
+        self.db.replace('k1', 'v1-x', expire_time=ts)
+        ttl = self.db.expire_time('k1')
+        self.assertTrue(abs(ttl - ts) < 2)
+
+        # We can also provide a timedelta.
+        td = datetime.timedelta(seconds=600)
+        ts = int(time.time()) + 600
+        self.db.replace('k1', 'v1-y', expire_time=td)
+        ttl = self.db.expire_time('k1')
+        self.assertTrue(abs(ttl - ts) < 2)
+
     def test_script_touch(self):
         now = int(time.time())
 
@@ -803,8 +839,8 @@ class TestLuaExpireTime(BaseLuaTestCase):
         xt1 = now + 100
         xt2 = now + 200
         xt_none = 0xffffffffff
-        self.db.set('k1', 'v1', expire_time=-xt1)
-        self.db.set('k2', 'v2', expire_time=-xt2)
+        self.db.set('k1', 'v1', expire_time=xt1)
+        self.db.set('k2', 'v2', expire_time=xt2)
         self.db.set('k3', 'v3')
 
         self.assertXT(['k1', 'k2', 'k3'], {
@@ -814,12 +850,17 @@ class TestLuaExpireTime(BaseLuaTestCase):
 
         # Update the timestamp and verify the return value.
         xt1_1 = now + 300
-        res = self.db.touch('k1', -xt1_1)
+        res = self.db.touch('k1', xt1_1)
         self.assertEqual(res, xt1)
         self.assertXT(['k1'], {'k1': ('v1', xt1_1)})
 
+        # We can also pass a relative value.
+        res = self.db.touch('k1', 300)
+        self.assertEqual(res, xt1_1)
+        self.assertXT(['k1'], {'k1': ('v1', xt1_1)})
+
         # Test that leaving the timestamp unchanged also works as expected.
-        res = self.db.touch('k2', -xt2)
+        res = self.db.touch('k2', xt2)
         self.assertEqual(res, xt2)
         self.assertXT(['k1', 'k2', 'k3'], {
             'k1': ('v1', xt1_1),
@@ -835,7 +876,7 @@ class TestLuaExpireTime(BaseLuaTestCase):
         self.assertTrue(abs(old_xt - xt1_2) < 2)
 
         # And again, using the absolute timestamp.
-        self.db.touch('k1', -xt1_2)
+        self.db.touch('k1', xt1_2)
 
         # Test using non-existent key.
         old_xt = self.db.touch('kx')
@@ -850,7 +891,7 @@ class TestLuaExpireTime(BaseLuaTestCase):
         self.assertEqual(old_xt, xt_none)
 
         # And check that we can set a cleared key.
-        old_xt = self.db.touch('k3', -xt1)
+        old_xt = self.db.touch('k3', xt1)
         self.assertEqual(old_xt, xt_none)
 
         # Verify final state.
@@ -867,13 +908,13 @@ class TestLuaExpireTime(BaseLuaTestCase):
         xt2 = now + 200
         xt_none = 0xffffffffff
         self.db.set_bulk_details([
-            (0, 'k1', 'v1', -xt1),
-            (0, 'k2', 'v2', -xt2),
+            (0, 'k1', 'v1', xt1),
+            (0, 'k2', 'v2', xt2),
             (0, 'k3', 'v3', 60),
             (0, 'k4', 'v4', None)])
 
         xt1_1 = now + 300
-        res = self.db.touch_bulk(['k1', 'k3', 'kx'], -xt1_1)
+        res = self.db.touch_bulk(['k1', 'k3', 'kx'], xt1_1)
         self.assertEqual(res, {'k1': xt1, 'k3': now + 60})
 
         self.assertXT(['k1', 'k2', 'k3', 'k4'], {
@@ -901,8 +942,8 @@ class TestLuaExpireTime(BaseLuaTestCase):
         xt2 = now + 200
         xt_none = 0xffffffffff
         self.db.set_bulk_details([
-            (0, 'k1', 'v1', -xt1),
-            (0, 'k2', 'v2', -xt2),
+            (0, 'k1', 'v1', xt1),
+            (0, 'k2', 'v2', xt2),
             (0, 'k3', 'v3', 60),
             (0, 'k4', 'v4', None)])
 
