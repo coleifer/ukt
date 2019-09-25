@@ -9,6 +9,7 @@ import time
 
 from ukt.client import KT_BINARY
 from ukt.client import KyotoTycoon
+from ukt.exceptions import KTError
 
 
 logger = logging.getLogger(__name__)
