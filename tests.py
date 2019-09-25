@@ -17,11 +17,6 @@ except ImportError:
 
 from ukt import *
 from ukt.client import EXPIRE
-if sys.version_info[0] > 2:
-    from ukt.replication import REPL_CLEAR
-    from ukt.replication import REPL_REMOVE
-    from ukt.replication import REPL_SET
-    from ukt.replication import ReplicationClient
 
 
 class BaseTestCase(unittest.TestCase):
@@ -168,30 +163,30 @@ class KyotoTycoonTests(object):
         self.assertEqual(self.db.remove_bulk_http(['k1', 'k2', 'k3']), 2)
 
     def test_http_signal(self):
-        evt = threading.Event()
         def wait_get():
-            evt.set()
-            val = self.db.get_http('k1', signal='sig1', wait=3)
+            val = self.db.get_http('k1', signal='sig1', wait=2)
             self.assertEqual(val, 'v1-x')
         t = threading.Thread(target=wait_get)
         t.start()
 
-        evt.wait()  # Wait til thread starts up to make the call.
         r = self.db.set_bulk_http({'k1': 'v1-x', 'k2': 'v2-y'}, signal='sig1',
                                   send=True)
         t.join()
         self.assertEqual(r, 2)
-        evt.clear()
 
         def wait_seize():
-            evt.set()
-            val = self.db.seize('k1', signal='sig2', wait=3)
+            val = self.db.seize('k1', signal='sig2', wait=2)
             self.assertEqual(val, 'v1-z')
         t = threading.Thread(target=wait_seize)
         t.start()
 
-        evt.wait()
+        # Send an arbitrary signal.
+        r = self.db.set_http('k1', 'v1-y', signal='sigx', send=True)
+        self.assertEqual(r, 1)
+
+        # Send the actual signal we are waiting for in our thread.
         r = self.db.set_http('k1', 'v1-z', signal='sig2', send=True)
+        self.assertEqual(r, 1)
         t.join()
 
         if self.db.count() != 1:
@@ -2564,59 +2559,6 @@ class TestArrayMapSerialization(unittest.TestCase):
 
         self.assertEqual(serialize([]), b'')
         self.assertEqual(deserialize(b''), [])
-
-
-@unittest.skipIf(sys.version_info[0] < 3, 'requires python 3')
-class TestReplicationClient(BaseTestCase):
-    ulog_dir = tempfile.mkdtemp(prefix='ukt-ulog')
-    server_kwargs = {'database': '%', 'server_args': [
-        '-sid', '9',
-        '-ulog', ulog_dir,
-        '*']}
-
-    def test_replication_client(self):
-        rc = ReplicationClient(self.db, 100)
-        accum = []
-        evt = threading.Event()
-
-        def run_rc():
-            i = 0
-            log_gen = rc.run()
-            evt.set()
-            for log in log_gen:
-                i += 1
-                accum.append(log)
-                if i == 6:
-                    rc.stop()
-        t = threading.Thread(target=run_rc)
-        t.daemon = True
-        t.start()
-
-        # The default expire time, if unspecified. We do this because
-        # specifying the expire time via the SET operation is relative to the
-        # current time.
-        xt = 0xffffffffff
-        evt.wait()
-
-        self.db.set('k1', 'v1')
-        self.db.add('k2', 'v2', db=1)
-        self.db.replace('k2', 'v2-x', db=1)  # First 3 ops.
-        self.db.add('k1', 'v1-y')  # No operation.
-        self.db.replace('k2', 'v2')  # No operation.
-        self.db.remove_bulk_details([(0, 'k1'), (1, 'k2')])
-        self.db.clear()
-
-        t.join(timeout=5)
-        self.assertEqual(accum, [
-            {'sid': 9, 'db': 0, 'op': REPL_SET, 'key': 'k1', 'value': 'v1',
-             'xt': xt},
-            {'sid': 9, 'db': 1, 'op': REPL_SET, 'key': 'k2', 'value': 'v2',
-             'xt': xt},
-            {'sid': 9, 'db': 1, 'op': REPL_SET, 'key': 'k2', 'value': 'v2-x',
-             'xt': xt},
-            {'sid': 9, 'db': 0, 'op': REPL_REMOVE, 'key': 'k1'},
-            {'sid': 9, 'db': 1, 'op': REPL_REMOVE, 'key': 'k2'},
-            {'sid': 9, 'db': 0, 'op': REPL_CLEAR}])
 
 
 class TestConnectionError(unittest.TestCase):
