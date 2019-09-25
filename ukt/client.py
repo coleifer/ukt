@@ -87,7 +87,7 @@ def convert_xt(xt):
     if xt is None:
         return EXPIRE
     elif isinstance(xt, datetime.datetime):
-        return -time.mktime(xt.timetuple())
+        return int(-time.mktime(xt.timetuple()))
     elif isinstance(xt, (int, float)) and xt >= xt_cutoff:
         # Negative expire-times are treated as timestamps. Otherwise, they are
         # treated as relative to current time.
