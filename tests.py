@@ -757,6 +757,36 @@ class TestMultiDB(BaseTestCase):
         k1.clear()
         self.assertTrue('k3' not in k1)
 
+    def test_details_apis(self):
+        xt = int(time.time()) + 3600
+        xt_none = 0xffffffffff
+        n = self.db.set_bulk_details([
+            (0, 'k1', 'v1-0', None),
+            (1, 'k1', 'v1-1', -xt),
+            (1, 'k2', 'v2', -xt),
+            (0, 'k3', 'v3', None)])
+        self.assertEqual(n, 4)
+
+        res = self.db.get_bulk_details([
+            (0, 'k1'), (1, 'k1'), (0, 'k2'), (1, 'k2'),
+            (0, 'kx'), (1, 'ky'), (2, 'xx')])
+        self.assertEqual(res, [
+            (0, 'k1', 'v1-0', xt_none),
+            (1, 'k1', 'v1-1', xt),
+            (1, 'k2', 'v2', xt)])
+
+        n = self.db.remove_bulk_details([
+            (0, 'k1'),
+            (0, 'k2'),
+            (1, 'k1'),
+            (1, 'k3')])
+        self.assertEqual(n, 2)
+
+        res = self.db.get_bulk_details([
+            (0, 'k1'), (0, 'k2'), (0, 'k3'),
+            (1, 'k1'), (1, 'k2'), (1, 'k3')])
+        self.assertEqual(res, [(0, 'k3', 'v3', xt_none), (1, 'k2', 'v2', xt)])
+
 
 class BaseLuaTestCase(BaseTestCase):
     lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')

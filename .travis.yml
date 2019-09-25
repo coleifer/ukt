@@ -13,4 +13,4 @@ install:
   - pip install cython msgpack-python
   - python setup.py build_ext -i
 script:
-  - python tests.py
+  - python tests.py -v

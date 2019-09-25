@@ -14,6 +14,8 @@ from ukt.serializer import safe_decode
 REPLICATION = b'\xb1'
 SYNC = b'\xb0'
 
+# Defined in kttimeddb.h. The other operations do not result in any replication
+# activity, so they are not defined here.
 REPL_SET = 0xa1
 REPL_REMOVE = 0xa2
 REPL_CLEAR = 0xa5
