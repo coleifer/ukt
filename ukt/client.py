@@ -1547,6 +1547,21 @@ class KyotoTycoon(object):
         if out:
             return int(out[b'xt'])
 
+    def expires(self, key, db=None):
+        """
+        Get the expire time as a datetime.
+
+        :param str key: key to check.
+        :param int db: database index
+        :return: expire datetime or None if key not found.
+        """
+        ts = self.expire_time(key, db)
+        if not ts:
+            return
+        elif ts > (10 ** 11):
+            return datetime.datetime.max
+        return datetime.datetime.fromtimestamp(ts)
+
     def error(self, db=None):
         """
         Get the last error code and message.
