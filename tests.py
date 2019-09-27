@@ -832,6 +832,15 @@ class TestLuaExpireTime(BaseLuaTestCase):
         ttl = self.db.expire_time('k1')
         self.assertTrue(abs(ttl - ts) < 2)
 
+    def test_expires(self):
+        dt = datetime.datetime.now().replace(microsecond=0)
+        dt += datetime.timedelta(seconds=3600)
+        self.db.set('k1', 'v1', expire_time=dt)
+        self.assertEqual(self.db.expires('k1'), dt)
+        self.db.set('k2', 'v2')
+        self.assertEqual(self.db.expires('k2'), datetime.datetime.max)
+        self.assertTrue(self.db.expires('k3') is None)
+
     def test_script_touch(self):
         now = int(time.time())
 
