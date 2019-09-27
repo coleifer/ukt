@@ -644,6 +644,14 @@ Kyoto Tycoon client
         Get the expire time by running a lua function (expire_time) defined in
         scripts/kt.lua.
 
+    .. py:method:: expires(key, db=None)
+
+        :param str key: key to check.
+        :param int db: database index
+        :return: expire ``datetime`` or None if key not found.
+
+        Get the expire time as a ``datetime``.
+
     .. py:method:: error(db=None)
 
         :param int db: database index.
