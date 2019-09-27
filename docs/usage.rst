@@ -165,6 +165,13 @@ database, you can also specify an expiration time (in seconds):
     >>> time.sleep(5)
     >>> client.get('k1')  # Returns None
 
+Expiration time can be specified in the following ways:
+
+* Integers less than 6 months (in seconds) are treated as relative timestamps.
+* Integers larger are treated as unix timestamps.
+* ``datetime.datetime`` objects specify the expire time.
+* ``datetime.timedelta`` objects specify a the time relative to now.
+
 Multiple Databases
 ^^^^^^^^^^^^^^^^^^
 
