@@ -15,8 +15,13 @@ else:
 try:
     from ukt import __version__
 except ImportError:
-    warnings.warn('could not import ukt module to determine version')
+    with open('ukt/__init__.py') as fh:
+        contents = fh.read().splitlines()
     __version__ = '0.0.0'
+    for line in contents:
+        if line.startswith('__version__'):
+            __version__ = line.split(' = ').strip("'")
+            break
 
 
 if cython_installed:
