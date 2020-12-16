@@ -20,7 +20,7 @@ except ImportError:
     __version__ = '0.0.0'
     for line in contents:
         if line.startswith('__version__'):
-            __version__ = line.split(' = ').strip("'")
+            __version__ = line.split(' = ')[1].strip("'")
             break
 
 
