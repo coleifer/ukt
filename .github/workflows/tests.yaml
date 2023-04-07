@@ -4,6 +4,7 @@ jobs:
   tests:
     name: ${{ matrix.python-version }}
     runs-on: ubuntu-16.04
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
