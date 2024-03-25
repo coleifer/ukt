@@ -139,8 +139,8 @@ class KyotoTycoonTests(object):
 
         # Test matching.
         self.assertEqual(sorted(self.db.match_prefix('k')), ['k2', 'key'])
-        self.assertEqual(self.db.match_regex('k[0-9]'), ['k2'])
-        self.assertEqual(self.db.match_regex('x\d'), [])
+        self.assertEqual(self.db.match_regex(r'k[0-9]'), ['k2'])
+        self.assertEqual(self.db.match_regex(r'x\d'), [])
         self.assertEqual(self.db.match_similar('k'), ['k2'])
         self.assertEqual(sorted(self.db.match_similar('k', 2)), ['k2', 'key'])
 
@@ -289,8 +289,8 @@ class KyotoTycoonTests(object):
 
         # Test matching.
         self.assertEqual(sorted(self.db.match_prefix('k')), keys)
-        self.assertEqual(sorted(self.db.match_regex('k00[25]3')), ['k0023', 'k0053'])
-        self.assertEqual(self.db.match_regex('x\d'), [])
+        self.assertEqual(sorted(self.db.match_regex(r'k00[25]3')), ['k0023', 'k0053'])
+        self.assertEqual(self.db.match_regex(r'x\d'), [])
         self.assertEqual(self.db.match_similar('k0022'), [
             'k0022',  # Exact match is always first, regardless of storage.
             'k0002', 'k0012',
@@ -737,10 +737,10 @@ class TestMultiDB(BaseTestCase):
         self.assertEqual(sorted(k1.match_prefix('k')), ['k13', 'k3'])
         self.assertEqual(sorted(k1.match_prefix('k', db=0)), ['k03', 'k3'])
 
-        self.assertEqual(sorted(k0.match_regex('k')), ['k03', 'k3'])
-        self.assertEqual(sorted(k0.match_regex('k', db=1)), ['k13', 'k3'])
-        self.assertEqual(sorted(k1.match_regex('k')), ['k13', 'k3'])
-        self.assertEqual(sorted(k1.match_regex('k', db=0)), ['k03', 'k3'])
+        self.assertEqual(sorted(k0.match_regex(r'k')), ['k03', 'k3'])
+        self.assertEqual(sorted(k0.match_regex(r'k', db=1)), ['k13', 'k3'])
+        self.assertEqual(sorted(k1.match_regex(r'k')), ['k13', 'k3'])
+        self.assertEqual(sorted(k1.match_regex(r'k', db=0)), ['k03', 'k3'])
 
         self.assertEqual(sorted(k0.keys()), ['i', 'j', 'k03', 'k3'])
         self.assertEqual(sorted(k0.keys(1)), ['i', 'j', 'k13', 'k3'])
