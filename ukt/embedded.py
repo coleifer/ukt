@@ -64,7 +64,11 @@ class EmbeddedServer(object):
             out, err = subprocess.PIPE, subprocess.PIPE
         else:
             out, err = sys.__stdout__.fileno(), sys.__stderr__.fileno()
-        self._server_p = subprocess.Popen(command, stderr=err, stdout=out)
+        try:
+            self._server_p = subprocess.Popen(command, stderr=err, stdout=out)
+        except Exception:
+            self._server_started.set()
+            raise
 
         self._server_started.set()
         self._server_p.wait()

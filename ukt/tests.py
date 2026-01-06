@@ -20,6 +20,11 @@ from ukt import *
 from ukt.client import EXPIRE
 
 
+if os.environ.get('KT_BINARY'):
+    kt_binary = os.environ['KT_BINARY']
+else:
+    kt_binary = 'ktserver'
+
 class BaseTestCase(unittest.TestCase):
     _server = None
     db = None
@@ -36,7 +41,7 @@ class BaseTestCase(unittest.TestCase):
             warnings.filterwarnings(action='ignore', message='unclosed',
                                     category=ResourceWarning)
 
-        kwargs = {'quiet': False}
+        kwargs = {'quiet': False, 'server': kt_binary}
         if cls.server_kwargs:
             kwargs.update(cls.server_kwargs)
         cls._server = cls.server(**kwargs)

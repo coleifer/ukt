@@ -1,0 +1,36 @@
+name: Tests
+on: [push]
+jobs:
+  tests:
+    name: ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.8, "3.10", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: build ktserver
+        run: |
+          sudo apt-get install liblzo2-dev libnsl-dev liblzma-dev lua5.1 liblua5.1-0-dev
+          wget https://dbmx.net/kyotocabinet/pkg/kyotocabinet-1.2.80.tar.gz
+          tar xzf kyotocabinet-1.2.80.tar.gz
+          cd kyotocabinet-1.2.80/
+          ./configure --enable-lzo --enable-lzma && make -j && sudo make install
+          sudo ldconfig
+          cd ../
+          wget https://dbmx.net/kyototycoon/pkg/kyototycoon-0.9.56.tar.gz
+          tar xzf kyototycoon-0.9.56.tar.gz
+          cd kyototycoon-0.9.56/
+          CPPFLAGS="-std=c++03" ./configure --enable-lua && make -j && sudo make install
+          sudo ldconfig
+      - name: pip deps
+        run: |
+          pip install .
+      - name: runtests
+        env:
+          KT_BINARY: /usr/local/bin/ktserver
+        run: python ukt/tests.py
