@@ -1,2 +1,31 @@
 [build-system]
 requires = ["setuptools", "wheel", "cython"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ukt"
+dynamic = ["version"]
+description = "fast, full-featured kyototycoon client"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Charles Leifer", email = "coleifer@gmail.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 2",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Repository = "https://github.com/coleifer/ukt"
+Documentation = "https://ukt.readthedocs.io/"
+
+[tool.setuptools.packages.find]
+include = ["ukt", "ukt.scripts"]
+
+[tool.setuptools.package-data]
+"ukt.scripts" = ["*.lua"]
+
+[tool.setuptools.dynamic]
+version = { attr = "ukt.__version__" }

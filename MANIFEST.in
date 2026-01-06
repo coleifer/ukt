@@ -1,8 +1,6 @@
 include LICENSE
 include README.md
-include pyproject.toml
-include tests.py
-include scripts/kt.lua
 include ukt/serializer.c
 include ukt/serializer.pyx
+include ukt/scripts/kt.lua
 recursive-include docs *
