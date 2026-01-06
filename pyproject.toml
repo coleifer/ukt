@@ -7,7 +7,6 @@ name = "ukt"
 dynamic = ["version"]
 description = "fast, full-featured kyototycoon client"
 readme = "README.md"
-license = { "file" = "LICENSE" }
 authors = [
     { name = "Charles Leifer", email = "coleifer@gmail.com" }
 ]
