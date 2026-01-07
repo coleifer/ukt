@@ -21,7 +21,7 @@ Repository = "https://github.com/coleifer/ukt"
 Documentation = "https://ukt.readthedocs.io/"
 
 [tool.setuptools.packages.find]
-include = ["ukt", "ukt.scripts"]
+include = ["ukt*"]
 
 [tool.setuptools.package-data]
 "ukt.scripts" = ["*.lua"]
