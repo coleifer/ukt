@@ -70,7 +70,7 @@ from ukt.serializer import _serialize_dict
 from ukt.serializer import _serialize_list
 
 
-num_re = re.compile('-?\d+')
+num_re = re.compile(r'-?\d+')
 xt_cutoff = 86400 * 180
 
 quote_b = partial(quote_from_bytes, safe='')
