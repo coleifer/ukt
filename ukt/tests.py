@@ -307,10 +307,9 @@ class KyotoTycoonTests(object):
         report = self.db.report()
         accum = {}
         for part in report['db_0'].split():
-            key, value = part.split(b'=')
+            key, value = part.split('=')
             accum[key] = value
-        self.assertEqual(accum[b'path'],
-                         self.server_kwargs['database'].encode('utf8'))
+        self.assertEqual(accum['path'], self.server_kwargs['database'])
 
     def test_decoding_errors_handling(self):
         keys = [b'foo\xfe\xff', b'bar\x00\xffnug']
@@ -586,8 +585,8 @@ class TestMultiDB(BaseTestCase):
         report = self.db.report()
         self.assertTrue('db_0' in report)
         self.assertTrue('db_1' in report)
-        self.assertTrue(report['db_0'].endswith(b'path=*'))
-        self.assertTrue(report['db_1'].endswith(b'path=%'))
+        self.assertTrue(report['db_0'].endswith('path=*'))
+        self.assertTrue(report['db_1'].endswith('path=%'))
 
     def test_list_databases(self):
         self.assertEqual(self.db.databases, ['*', '%'])

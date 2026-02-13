@@ -70,7 +70,8 @@ from ukt.serializer import _serialize_dict
 from ukt.serializer import _serialize_list
 
 
-num_re = re.compile(r'-?\d+')
+num_re = re.compile(r'^-?\d+$')
+float_re = re.compile(r'^\d+\.\d+$')
 xt_cutoff = 86400 * 180
 
 quote_b = partial(quote_from_bytes, safe='')
@@ -850,7 +851,15 @@ class KyotoTycoon(object):
         :return: a dictionary of metadata about the server state.
         """
         resp, status = self._request('/report', {}, None, **kw)
-        return resp
+        accum = {}
+        for key, value in resp.items():
+            value = decode(value)
+            if num_re.match(value):
+                value = int(value)
+            elif float_re.match(value):
+                value = float(value)
+            accum[key] = value
+        return accum
 
     def status(self, db=None, **kw):
         """
@@ -895,7 +904,7 @@ class KyotoTycoon(object):
 
             # Value is of the format: count=X size=Y path=Z. We ignore count
             # and size, as we will pull these from the /status API anyways.
-            path = value.decode('utf8').split(' ', 2)[-1]
+            path = value.split(' ', 2)[-1]
             accum.append((db_idx, path.split('=', 1)[-1]))
 
         return [path for _, path in sorted(accum)]
