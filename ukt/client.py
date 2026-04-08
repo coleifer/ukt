@@ -407,6 +407,10 @@ class KyotoTycoon(object):
         sock = self.pool.checkout(http)
         try:
             yield sock
+        except:
+            if not http and not getattr(sock, 'is_closed', True):
+                sock.close()
+            raise
         finally:
             self.pool.checkin(sock, http)
 
