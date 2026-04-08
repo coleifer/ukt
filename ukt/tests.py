@@ -61,7 +61,7 @@ class BaseTestCase(unittest.TestCase):
 
     @classmethod
     def get_embedded_server(cls):
-        if self.server is None:
+        if cls.server is None:
             raise NotImplementedError
 
     def get_client(self, serializer):
@@ -2567,6 +2567,13 @@ class TestArrayMapSerialization(unittest.TestCase):
                                   'e' * 1024 * 16: 'f' * 1024 * 1024,
                                   'g': 'g' * 128})
         self.assertSerializeDict({})
+
+        self.assertSerializeDict({
+            'small': 'v',
+            'k' * 200: 'v' * 2000,
+            'medium': 'data',
+            'k' * 300: 'v' * 3000,
+        })
 
     def test_dict_serialization(self):
         serialize, deserialize = (self.db.serialize_dict,

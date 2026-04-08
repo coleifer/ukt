@@ -124,7 +124,7 @@ def _deserialize_dict(raw_data, deserialize=True):
 
         vstep = _readvarnum(<unsigned char *>buf, buflen, &vnum)
 
-        if buflen < vstep + vnum:
+        if buflen < vstep + knum + vnum :
             free(kbuf); free(vbuf)
             raise ValueError('corrupt value, refusing to process')
 
@@ -136,7 +136,7 @@ def _deserialize_dict(raw_data, deserialize=True):
         if knum > kitemsize:
             free(kbuf)
             kbuf = <char *>malloc(knum * sizeof(unsigned char))
-
+            kitemsize = knum
         memcpy(kbuf, buf, knum)
         bkey = kbuf[:knum]
 
@@ -147,6 +147,7 @@ def _deserialize_dict(raw_data, deserialize=True):
         if vnum > vitemsize:
             free(vbuf)
             vbuf = <char *>malloc(vnum * sizeof(unsigned char))
+            vitemsize = vnum
 
         memcpy(vbuf, buf, vnum)
         bval = vbuf[:vnum]
@@ -224,6 +225,7 @@ def _deserialize_list(raw_data, deserialize=True):
         if num > itemsize:
             free(item)
             item = <char *>malloc(num * sizeof(unsigned char))
+            itemsize = num
 
         memcpy(item, buf, num)
         bitem = item[:num]

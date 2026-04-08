@@ -94,7 +94,7 @@ def convert_xt(xt):
         # treated as relative to current time.
         return -xt
     elif isinstance(xt, datetime.timedelta):
-        return xt.total_seconds()
+        return int(xt.total_seconds())
     return xt
 
 
@@ -1706,7 +1706,8 @@ class Cursor(object):
     def __next__(self):
         if not self._valid:
             raise StopIteration
-        kv = self.protocol.cur_get(self.cursor_id, step=True)
+        kv = self.protocol.cur_get(self.cursor_id, step=True,
+                                   decode_value=self._decode_values)
         if kv is None:
             self._valid = False
             raise StopIteration

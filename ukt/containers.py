@@ -182,7 +182,7 @@ class Set(Container):
     def _multi_store(self, fn, other, dest=None):
         raw_data = {'key2': other.key if isinstance(other, Set) else other}
         if dest is not None:
-            raw_data['dest'] = dest.key if isinstance(other, Set) else dest
+            raw_data['dest'] = dest.key if isinstance(dest, Set) else dest
         out = self.lua(fn, decode=True, raw_data=raw_data)
         return set(out.values())
 
