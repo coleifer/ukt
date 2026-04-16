@@ -2490,7 +2490,7 @@ class TestConnectionPool(BaseTestCase):
         s2 = p.create_socket()
 
         now = time.time()
-        p.free = [(now - 3601, s1), (now, s2)]
+        p.free = [(now - 3601, 0, s1), (now, 0, s2)]
         s = p.checkout()
         self.assertTrue(s is s2)
         self.assertEqual(p.stats, (1, 0, 0, 0))
@@ -2510,7 +2510,7 @@ class TestConnectionPool(BaseTestCase):
         now = time.time()
         s1_time = now - 3400
         s2_time = now - 3000
-        p.free = [(s1_time, s1), (s2_time, s2)]
+        p.free = [(s1_time, 0, s1), (s2_time, 0, s2)]
 
         # Checking out a socket gives us the oldest one first.
         s = p.checkout()
@@ -2522,7 +2522,8 @@ class TestConnectionPool(BaseTestCase):
         self.assertEqual(p.stats, (0, 2, 0, 0))
 
         # Pool retains the timestamp for the socket creation.
-        self.assertEqual(p.free, [(s1_time, s1), (s2_time, s2)])
+        ts_s = [(ts, s) for ts, _, s in p.free]
+        self.assertEqual(ts_s, [(s1_time, s1), (s2_time, s2)])
 
         # We get s1 again, as it is still the oldest.
         s = p.checkout()

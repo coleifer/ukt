@@ -91,7 +91,8 @@ class ReplicationClient(object):
             self._finished.set()
 
     def _run(self, timestamp):
-        with self.kt.ctx() as sock:
+        sock = self.kt.pool.create_socket()
+        try:
             buf = io.BytesIO()
             buf.write(REPLICATION)
             buf.write(b'\x00\x00\x00\x00')  # Flags (0).
@@ -112,6 +113,8 @@ class ReplicationClient(object):
                 nbytes, = struct_i.unpack(sock.recv(4))
                 data = sock.recv(nbytes)
                 yield self._parse_ulog(memoryview(data))
+        finally:
+            sock.close()
 
     def _parse_ulog(self, data):
         sid, db, op = struct_hhb.unpack(data[:5])
@@ -180,7 +183,7 @@ class TestReplicationServer(unittest.TestCase):
             '-le',
             '-sid', '9',
             '-scr',
-            os.path.join(os.path.dirname(__file__), '../scripts/kt.lua'),
+            os.path.join(os.path.dirname(__file__), 'scripts/kt.lua'),
             '-ulog', ulog_dir,
             '%']
         cls._server = EmbeddedServer(database='%', server_args=server_args)

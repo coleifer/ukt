@@ -107,9 +107,8 @@ class EmbeddedServer(object):
         while attempts < 20:
             attempts += 1
             try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.connect((self.host, self.port))
-                s.close()
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect((self.host, self.port))
                 return True
             except socket.error:
                 time.sleep(0.1)
@@ -137,15 +136,14 @@ class EmbeddedServer(object):
         return True
 
     def _find_open_port(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         attempts = 0
         while attempts < 32:
             attempts += 1
             port = random.randint(16000, 32000)
             try:
-                sock.bind(('127.0.0.1', port))
-                sock.listen(1)
-                sock.close()
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('127.0.0.1', port))
+                    s.listen(1)
                 time.sleep(0.1)
                 return port
             except OSError:

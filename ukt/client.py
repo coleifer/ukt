@@ -204,6 +204,7 @@ class Pool(object):
         self.in_use_http = {}
         self.free_http = []
         self._lock = threading.RLock()
+        self._seq = itertools.count()
 
     @property
     def stats(self):
@@ -236,7 +237,7 @@ class Pool(object):
         threshold = time.time() - self.max_age
         with self._lock:
             while free_list:
-                ts, sock = heapq.heappop(free_list)
+                ts, _, sock = heapq.heappop(free_list)
                 if ts > threshold:
                     in_use[sock] = ts
                     return sock
@@ -255,19 +256,19 @@ class Pool(object):
                 if ts < threshold:
                     sock.close()
                 elif sock.sock is not None:
-                    heapq.heappush(self.free_http, (ts, sock))
+                    heapq.heappush(self.free_http, (ts, next(self._seq), sock))
             else:
                 ts = self.in_use.pop(sock)
                 if ts < threshold:
                     sock.close()
                 elif not sock.is_closed:
-                    heapq.heappush(self.free, (ts, sock))
+                    heapq.heappush(self.free, (ts, next(self._seq), sock))
 
     def disconnect(self):
         n = 0
         with self._lock:
             free_sockets = itertools.chain(self.free, self.free_http)
-            for _, sock in free_sockets:
+            for _, _, sock in free_sockets:
                 sock.close()
                 n += 1
 
@@ -334,7 +335,7 @@ class KyotoTycoon(object):
     :param int max_age: max idle time for socket in connection pool.
     """
     _content_type = 'text/tab-separated-values; colenc=B'
-    _cursor_id = 0
+    _cursor_id = itertools.count()
 
     def __init__(self, host='127.0.0.1', port=1978, timeout=None, default_db=0,
                  decode_keys=True, serializer=None, encode_value=None,
@@ -1376,8 +1377,7 @@ class KyotoTycoon(object):
         :return: a :py:class:`Cursor`.
         """
         if cursor_id is None:
-            KyotoTycoon._cursor_id += 1
-            cursor_id = KyotoTycoon._cursor_id
+            cursor_id = next(KyotoTycoon._cursor_id)
         return Cursor(self, cursor_id, db, decode_values, encode_values)
 
     def ulog_list(self):
