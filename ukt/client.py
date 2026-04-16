@@ -92,10 +92,10 @@ def convert_xt(xt):
     elif isinstance(xt, (int, float)) and xt >= xt_cutoff:
         # Negative expire-times are treated as timestamps. Otherwise, they are
         # treated as relative to current time.
-        return -xt
+        return int(-xt)
     elif isinstance(xt, datetime.timedelta):
         return int(xt.total_seconds())
-    return xt
+    return int(xt) if isinstance(xt, float) else xt
 
 
 READSIZE = 1024 * 4
