@@ -1234,6 +1234,9 @@ function get_range(inmap, outmap)
   local key, value
   while true do
     key = cur:get_key()
+    if not key then
+        break
+    end
     if stop_key and key > stop_key then
       break
     end
@@ -1253,9 +1256,9 @@ end
 function hash(inmap, outmap)
   for key, val in pairs(inmap) do
     if val == 'fnv' then
-      outmap[key] = kt.hash_fnv(val)
+      outmap[key] = kt.hash_fnv(key)
     else
-      outmap[key] = kt.hash_murmur(val)
+      outmap[key] = kt.hash_murmur(key)
     end
   end
 end
@@ -1374,6 +1377,7 @@ function queue_transfer(inmap, outmap)
     end
 
     cursor:disable()
+    return kt.RVSUCCESS
   end
   return _qfn(inmap, outmap, {"queue", "dest"}, fn)
 end
@@ -1605,7 +1609,7 @@ function queue_set_score(inmap, outmap)
     end
     _queue_iter(db, queue, n, iter_cb)
     outmap.num = #remove
-    if outmap.num then
+    if outmap.num > 0 then
       db:remove_bulk(remove)
       db:set_bulk(accum)
     end
@@ -1822,7 +1826,7 @@ function _hx_keys_for_query(s, p, o)
   elseif s and p then
     parts = {"spo", s, p}
   elseif s and o then
-    parts = {"osp", s, o}
+    parts = {"osp", o, s}
   elseif p and o then
     parts = {"pos", p, o}
   elseif s then
@@ -2101,7 +2105,7 @@ function schedule_add(inmap, outmap)
   -- local score_id = kt.pack("MM", score, next_id)
   local next_key = string.format("%s\t%012d%012d", key, score, next_id)
   if not db:add(next_key, inmap.value) then
-    kt.log("system", "data for score/id '" .. score_id .. "' already exists.")
+    kt.log("system", "data for score/id '" .. next_key .. "' already exists.")
     return kt.RVELOGIC
   end
   outmap.key = next_key
