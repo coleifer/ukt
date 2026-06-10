@@ -168,6 +168,12 @@ class KyotoTycoonTests(object):
                          {'k1': 'v1-x', 'k3': 'v3'})
         self.assertEqual(self.db.remove_bulk_http(['k1', 'k2', 'k3']), 2)
 
+    def test_http_bytes_keys(self):
+        self.assertEqual(self.db.set_bulk_http({b'bk1': 'v1', 'bk2': 'v2'}), 2)
+        self.assertEqual(self.db.get(b'bk1'), 'v1')
+        self.assertEqual(self.db.get('bk2'), 'v2')
+        self.assertEqual(self.db.remove_bulk_http([b'bk1', 'bk2']), 2)
+
     def test_http_signal(self):
         def wait_get():
             val = self.db.get_http('k1', signal='sig1', wait=2)
@@ -2017,11 +2023,79 @@ class TestLuaContainers(BaseLuaTestCase):
         self.db.remove(l.key)
         self.assertEqual(l.get_raw(), None)
 
+    def test_container_expire_time_preserved(self):
+        # Mutating a container must not alter the expire time of its key.
+        xt = int(time.time()) + 600
+
+        h = self.db.Hash('h1')
+        h['k1'] = 'v1'
+        self.db.touch('h1', xt)
+        h['k2'] = 'v2'
+        self.assertEqual(h.get_all(), {'k1': 'v1', 'k2': 'v2'})
+        self.assertEqual(self.db.expire_time('h1'), xt)
+
+        l = self.db.List('l1')
+        l.append('i0')
+        self.db.touch('l1', xt)
+        l.append('i1')
+        self.assertEqual(l.popleft(), 'i0')
+        self.assertEqual(self.db.expire_time('l1'), xt)
+
+        s = self.db.Set('s1')
+        s.add('a')
+        self.db.touch('s1', xt)
+        s.add('b')
+        self.assertEqual(s.remove('a'), 1)
+        self.assertEqual(self.db.expire_time('s1'), xt)
+
+        # Rotation via rpoplpush also preserves the expire time.
+        l2 = self.db.List('l2')
+        l2.extend(['a', 'b'])
+        self.db.touch('l2', xt)
+        self.assertEqual(l2.rpoplpush(), 'b')
+        self.assertEqual(self.db.expire_time('l2'), xt)
+
+    def test_no_op_writes_do_not_create_keys(self):
+        l = self.db.List('lx')
+        self.assertTrue(l.popleft() is None)
+        self.assertTrue(l.popright() is None)
+        self.assertEqual(l.remove_range(), 0)
+        self.assertFalse('lx' in self.db)
+
+        h = self.db.Hash('hx')
+        self.assertEqual(h.remove('k1'), 0)
+        self.assertEqual(h.remove_bulk(['k1', 'k2']), 0)
+        self.assertFalse('hx' in self.db)
+
+    def test_container_decode_keys_off(self):
+        db = KyotoTycoon(self._server.host, self._server.port,
+                         serializer=KT_PICKLE, decode_keys=False)
+        try:
+            h = db.Hash('hdk')
+            self.assertEqual(h.set('k1', 'v1'), 1)
+            self.assertEqual(h.get('k1'), 'v1')
+            self.assertTrue(h.get('kx') is None)
+        finally:
+            db.close_all()
+
 
 class TestLuaContainersMultiDB(BaseLuaTestCase):
     server_kwargs = {
         'database': '%',
         'server_args': ['-scr', BaseLuaTestCase.lua_script, '*']}
+
+    def test_container_clear_db(self):
+        h0 = self.db.Hash('h1', db=0)
+        h1 = self.db.Hash('h1', db=1)
+        h0.set('k', 'v0')
+        h1.set('k', 'v1')
+
+        h1.clear()
+        self.assertTrue(self.db.exists('h1', db=0))
+        self.assertFalse(self.db.exists('h1', db=1))
+
+        h0.clear()
+        self.assertFalse(self.db.exists('h1', db=0))
 
     def test_hash_multidb(self):
         self.db.set_database(1)
@@ -2133,6 +2207,18 @@ class TestLuaHexastore(BaseLuaTestCase):
 
 
 class TestLuaQueue(BaseLuaTestCase):
+    def test_queue_pattern_chars(self):
+        # Queue names containing lua pattern characters work correctly.
+        q = self.db.Queue('test-queue.1%')
+        self.assertEqual(q.add('i1'), 1)
+        self.assertEqual(q.add('i2'), 2)
+        self.assertEqual(len(q), 2)
+        self.assertEqual(q.peek(), 'i1')
+        self.assertEqual(q.pop(), 'i1')
+        self.assertEqual(q.rpop(), 'i2')
+        self.assertTrue(q.pop() is None)
+        self.assertEqual(q.clear(), 0)
+
     def test_queue(self):
         qa = self.db.Queue('qa')
         qb = self.db.Queue('qb')
@@ -2383,6 +2469,25 @@ class TestLuaSchedule(BaseTestCase):
         'database': '%',
         'server_args': ['-scr', lua_script]}
 
+    def test_schedule_pattern_chars(self):
+        # Schedule names containing lua pattern characters work correctly.
+        s = self.db.Schedule('sched-1.2')
+        s.add('i1', 1)
+        s.add('i2', 2)
+        self.assertEqual(len(s), 2)
+        self.assertEqual(s.read(), ['i1', 'i2'])
+
+    def test_schedule_clear_precise(self):
+        s1 = self.db.Schedule('s1')
+        s2 = self.db.Schedule('s1x')  # Shares "s1" as a prefix.
+        s1.add('a', 1)
+        s2.add('b', 1)
+
+        s1.clear()
+        self.assertEqual(len(s1), 0)
+        self.assertEqual(len(s2), 1)
+        self.assertEqual(s2.read(), ['b'])
+
     def test_lua_schedule(self):
         s = self.db.Schedule('sched')
         nums = [100, 10, 1000, 1, 3, 5, 4, 20, 2]
@@ -2410,6 +2515,35 @@ class TestLuaSchedule(BaseTestCase):
         self.assertEqual(s.read(n=2), ['ia-1', 'ib-3'])
         self.assertEqual(s.read(1), [])
         self.assertEqual(s.read(), ['ib-2', 'ib-1'])
+
+
+class TestSignalQueue(BaseTestCase):
+    server_kwargs = {'database': '%'}
+
+    def test_signal_queue(self):
+        sq = self.db.SignalQueue('sq')
+        ok, nlisteners = sq.produce('item1')
+        self.assertTrue(ok)
+        self.assertEqual(sq.consume(wait=1), 'item1')
+        self.assertTrue(sq.consume(wait=1) is None)
+
+    def test_signal_queue_isolation(self):
+        # Records that sort around the queue prefix are never seized.
+        self.db.set('sq', 'placeholder')
+        self.db.set('szz', 'other')
+
+        sq = self.db.SignalQueue('sq')
+        self.assertTrue(sq.consume(wait=1) is None)
+        self.assertEqual(self.db.get('sq'), 'placeholder')
+        self.assertEqual(self.db.get('szz'), 'other')
+
+        ok, _ = sq.produce('item1')
+        self.assertTrue(ok)
+        self.assertEqual(sq.consume(wait=1), 'item1')
+        self.assertEqual(self.db.get('sq'), 'placeholder')
+        self.assertEqual(self.db.get('szz'), 'other')
+
+        self.assertEqual(sq.flush(), 0)
 
 
 class TestMultipleThreads(BaseTestCase):
@@ -2464,6 +2598,20 @@ class TestConnectionPool(BaseTestCase):
 
         self.db.close_all()
         self.assertEqual(p.stats, (0, 0, 0, 0))
+
+    def test_pool_checkin_after_disconnect(self):
+        p = self.db.pool
+        sock = p.checkout()
+        http = p.checkout(http=True)
+        self.db.close_all()
+
+        # Returning connections that were checked-out across a disconnect is
+        # a no-op rather than an error, and they are not recycled.
+        p.checkin(sock)
+        p.checkin(http, http=True)
+        self.assertEqual(p.stats, (0, 0, 0, 0))
+
+        self.assertTrue(self.db.get('kx') is None)  # Client still usable.
 
     def test_many_threads(self):
         self.db.close_all()  # Ensure no open connections.

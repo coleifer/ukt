@@ -1,6 +1,9 @@
 # Base exception class.
 class KTError(Exception): pass
 
+# Client is misconfigured, e.g. an unrecognized serializer was specified.
+class ImproperlyConfigured(KTError): pass
+
 # Server returned an error response, e.g., there is a problem with the request.
 class ProtocolError(KTError): pass
 

@@ -73,7 +73,7 @@ class ReplicationClient(object):
         update-log per item.
         """
         if self._running:
-            return False
+            raise ReplicationError('replication client is already running')
 
         self._running = True
         self._finished.clear()
@@ -84,6 +84,9 @@ class ReplicationClient(object):
             timestamp = timestamp.timestamp()
 
         timestamp = int(timestamp * 10**9)  # Timestamp expressed in ns.
+        return self._run_wrapper(timestamp)
+
+    def _run_wrapper(self, timestamp):
         try:
             yield from self._run(timestamp)
         finally:

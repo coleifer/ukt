@@ -2,6 +2,7 @@ import random
 import time
 
 from ukt.exceptions import SignalTimeout
+from ukt.serializer import encode
 
 
 class Queue(object):
@@ -98,6 +99,11 @@ class Queue(object):
 
 
 class SignalQueue(object):
+    """
+    Queue which uses the database signalling functionality to reduce latency
+    between produce and consume. Requires an ordered database (e.g. the
+    tree-based "%" or ".kct" databases) to operate correctly.
+    """
     def __init__(self, client, key, signal='q', db=None, wait=10, cursor=None):
         self.client = client
         self.key = key
@@ -127,6 +133,11 @@ class SignalQueue(object):
         else:
             return True, int(r[b'SIGNALED'])
 
+    def _match(self, key, prefix):
+        if isinstance(key, bytes):
+            return key.startswith(encode(prefix))
+        return key.startswith(prefix)
+
     def consume(self, wait=None):
         """
         Consume data from the queue, blocking until new data arrives.
@@ -140,21 +151,42 @@ class SignalQueue(object):
         of the time it is waiting.
         """
         wait = self.wait if wait is None else wait
-        ok = self.client.cur_jump(self.cursor_id, self.key, self.db)
-        while not ok:
+        prefix = self.key + ':'
+
+        # Jump to the first queue item. The cursor may land on an unrelated
+        # key that happens to sort after the queue prefix, in which case no
+        # items exist and we wait on the signal and re-try.
+        use_signal = False
+        while True:
             try:
-                ok = self.client.cur_jump(self.cursor_id, self.key, self.db,
-                                          signal=self.signal, wait=wait)
+                if use_signal:
+                    ok = self.client.cur_jump(self.cursor_id, prefix, self.db,
+                                              signal=self.signal, wait=wait)
+                else:
+                    ok = self.client.cur_jump(self.cursor_id, prefix, self.db)
             except SignalTimeout:
                 return
+            use_signal = True
+            if ok:
+                key = self.client.cur_get_key(self.cursor_id)
+                if key is not None and self._match(key, prefix):
+                    break
 
-        resp = self.client.cur_seize(self.cursor_id)
-        if resp is not None:
-            return resp[1]
+        resp = self.client.cur_seize(self.cursor_id, decode_value=False)
+        if resp is None:
+            return
+        key, value = resp
+        if not self._match(key, prefix):
+            # The item under the cursor was consumed before we could seize it
+            # and the cursor advanced past the end of the queue keys. Restore
+            # the record we mistakenly seized.
+            self.client.set(key, value, db=self.db, encode_value=False)
+            return
+        return self.client.decode_value(value)
 
     def flush(self):
-        keys = self.client.match_prefix(self.key + ':')
-        return self.client.remove_bulk(keys)
+        keys = self.client.match_prefix(self.key + ':', db=self.db)
+        return self.client.remove_bulk(keys, db=self.db)
 
 
 class Schedule(object):
@@ -183,7 +215,8 @@ class Schedule(object):
                 for key in sorted(out, key=int)]
 
     def clear(self):
-        keys = self.kt.match_prefix(self._key, db=self._db)
+        keys = self.kt.match_prefix(self._key + '\t', db=self._db)
+        keys.append(self._key)  # Also remove the id-counter key.
         return self.kt.remove_bulk(keys, db=self._db)
 
     def count(self):
@@ -193,4 +226,5 @@ class Schedule(object):
     def items(self, n=None):
         keys = self.kt.match_prefix(self._key + '\t', n, self._db)
         data = self.kt.get_bulk(keys, db=self._db)
-        return [data[k] for k in keys]
+        # A key may expire between the match and the read.
+        return [data[k] for k in keys if k in data]

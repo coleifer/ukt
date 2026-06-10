@@ -47,7 +47,7 @@ class Container(object):
                               decode_values=decode_vals, _decode_keys=decode)
 
     def clear(self):
-        self.kt.remove(self.key)
+        self.kt.remove(self.key, db=self.db)
 
 
 class Hash(Container):
@@ -83,7 +83,9 @@ class Hash(Container):
     def get(self, key):
         out = self.lua('hget', raw_data={'key': key})
         if out:
-            return out['value']
+            # Response keys are bytes when the client was configured with
+            # decode_keys=False.
+            return out['value'] if 'value' in out else out[b'value']
 
     def remove(self, key):
         out = self.lua('hdel', decode=False, raw_data={'key': key})

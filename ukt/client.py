@@ -17,6 +17,7 @@ import heapq
 import io
 import itertools
 import json
+import random
 import re
 import socket
 import struct
@@ -52,6 +53,7 @@ EXPIRE = 0x7fffffffffffffff
 from ukt.containers import Hash
 from ukt.containers import List
 from ukt.containers import Set
+from ukt.exceptions import ImproperlyConfigured
 from ukt.exceptions import KTError
 from ukt.exceptions import ProtocolError
 from ukt.exceptions import ServerConnectionError
@@ -251,15 +253,17 @@ class Pool(object):
     def checkin(self, sock, http=False):
         threshold = time.time() - self.max_age
         with self._lock:
+            # A missing timestamp means the pool was disconnected while this
+            # connection was checked-out, in which case it is just closed.
             if http:
-                ts = self.in_use_http.pop(sock)
-                if ts < threshold:
+                ts = self.in_use_http.pop(sock, None)
+                if ts is None or ts < threshold:
                     sock.close()
                 elif sock.sock is not None:
                     heapq.heappush(self.free_http, (ts, next(self._seq), sock))
             else:
-                ts = self.in_use.pop(sock)
-                if ts < threshold:
+                ts = self.in_use.pop(sock, None)
+                if ts is None or ts < threshold:
                     sock.close()
                 elif not sock.is_closed:
                     heapq.heappush(self.free, (ts, next(self._seq), sock))
@@ -335,7 +339,10 @@ class KyotoTycoon(object):
     :param int max_age: max idle time for socket in connection pool.
     """
     _content_type = 'text/tab-separated-values; colenc=B'
-    _cursor_id = itertools.count()
+    # Cursors are identified server-side by their id and are shared across
+    # all connections, so begin at a random offset to avoid collisions with
+    # other client processes talking to the same server.
+    _cursor_id = itertools.count(random.randrange(2 ** 32))
 
     def __init__(self, host='127.0.0.1', port=1978, timeout=None, default_db=0,
                  decode_keys=True, serializer=None, encode_value=None,
@@ -462,11 +469,12 @@ class KyotoTycoon(object):
                     key = safe_decode(key)
                 accum[key] = value
 
-            # Decode values in 2nd pass so that a failure to decode doesn't
-            # leave the socket in an invalid state.
-            if decode_values:
-                for key in accum:
-                    accum[key] = self.decode_value(accum[key])
+        # Decode values in a 2nd pass, after the with-block has returned the
+        # socket to the pool, so that a failure to decode does not poison the
+        # connection.
+        if decode_values:
+            for key in accum:
+                accum[key] = self.decode_value(accum[key])
 
         return accum
 
@@ -504,9 +512,9 @@ class KyotoTycoon(object):
                     key = safe_decode(key)
                 accum.append((db, key, value, xt))
 
-            if decode_values:
-                accum = [(db, key, self.decode_value(value), xt)
-                         for (db, key, value, xt) in accum]
+        if decode_values:
+            accum = [(db, key, self.decode_value(value), xt)
+                     for (db, key, value, xt) in accum]
 
         return accum
 
@@ -742,9 +750,9 @@ class KyotoTycoon(object):
                     key = safe_decode(key)
                 accum[key] = value
 
-            if decode_values:
-                for key in accum:
-                    accum[key] = self.decode_value(accum[key])
+        if decode_values:
+            for key in accum:
+                accum[key] = self.decode_value(accum[key])
 
         return accum
 
@@ -989,7 +997,7 @@ class KyotoTycoon(object):
         for key, value in data.items():
             if encode_values:
                 value = self.encode_value(value)
-            accum['_%s' % key] = value
+            accum[b'_' + encode(key)] = value
 
         resp, status = self._request('/set_bulk', accum, db, atomic=atomic,
                                      decode_keys=False, **kw)
@@ -1504,8 +1512,12 @@ class KyotoTycoon(object):
         :return: a dict of key -> old expire time.
         """
         data = {'db': self.default_db if db is None else db}
+        # When clearing the expire-time, send the server's max expire-time as
+        # an absolute (negative) value. The int64-max sentinel used by the
+        # binary protocol is not exactly representable as a lua double.
+        xtval = -0xffffffffff if xt is None else convert_xt(xt)
         for key in keys:
-            data[key] = str(convert_xt(xt))
+            data[key] = str(xtval)
         out = self.script('touch_bulk', data=data, encode_values=False,
                           decode_values=False)
         return {key: int(decode(value)) for key, value in out.items()}

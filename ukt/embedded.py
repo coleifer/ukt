@@ -34,6 +34,7 @@ class EmbeddedServer(object):
         # Placeholders for server process and client.
         self._server_p = None
         self._client = None
+        self._server_error = None
 
     def _create_client(self):
         return KyotoTycoon(self.host, self.port, serializer=self._serializer)
@@ -66,20 +67,24 @@ class EmbeddedServer(object):
             out, err = sys.__stdout__.fileno(), sys.__stderr__.fileno()
         try:
             self._server_p = subprocess.Popen(command, stderr=err, stdout=out)
-        except Exception:
+        except Exception as exc:
+            self._server_error = exc
+            self._server_terminated.set()
             self._server_started.set()
-            raise
+            return
 
         self._server_started.set()
         self._server_p.wait()
+        self._server_terminated.set()
         self._client = None
         logger.info('server shutdown')
 
     def _stop_server(self, wait=False):
         self._server_terminated.set()
-        self._server_p.terminate()
-        if wait:
-            self._server_p.wait()
+        if self._server_p is not None:
+            self._server_p.terminate()
+            if wait:
+                self._server_p.wait()
         self._server_p = self._client = None
 
     def run(self):
@@ -93,6 +98,7 @@ class EmbeddedServer(object):
         if self.port is None:
             self.port = self._find_open_port()
 
+        self._server_error = None
         self._server_started.clear()
         self._server_terminated.clear()
 
@@ -101,6 +107,8 @@ class EmbeddedServer(object):
         t.start()
 
         self._server_started.wait()  # Wait for server to start up.
+        if self._server_error is not None:
+            raise KTError('Unable to start server: %s' % self._server_error)
         atexit.register(self._stop_server)
 
         attempts = 0
@@ -112,12 +120,10 @@ class EmbeddedServer(object):
                 return True
             except socket.error:
                 time.sleep(0.1)
-            except OSError:
-                time.sleep(0.1)
 
         self._stop_server()
         raise KTError('Unable to connect to server on %s:%s' %
-                               (self.host, self.port))
+                      (self.host, self.port))
 
     def stop(self, wait=False):
         if self._server_terminated.is_set():

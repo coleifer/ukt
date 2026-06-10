@@ -14,6 +14,24 @@ function _select_db(inmap)
 end
 
 
+-- The xt received by visitor functions (and returned by get()) is the
+-- absolute expiration timestamp, but the xt accepted by set() and visitor
+-- return values is relative (seconds from now) unless negative, in which
+-- case the absolute value is treated as an epoch time. Use this helper when
+-- re-emitting a record's xt, to preserve its expiration time.
+function _preserve_xt(xt)
+  if xt then return -xt end
+  return nil
+end
+
+
+-- Plain-string prefix test. Key prefixes may contain characters that are
+-- magic in lua patterns (e.g. "-"), so prefix checks must not use match().
+function _starts_with(s, prefix)
+  return string.sub(s, 1, #prefix) == prefix
+end
+
+
 -- helper function for hash functions.
 function hkv(inmap, outmap, fn, atomic, readonly)
   local key = inmap.table_key
@@ -35,7 +53,7 @@ function hkv(inmap, outmap, fn, atomic, readonly)
     local new_value
     new_value, ok = fn(key, value_tbl, inmap, outmap)
     if ok and new_value then
-      return kt.mapdump(new_value), xt
+      return kt.mapdump(new_value), _preserve_xt(xt)
     else
       return kt.Visitor.NOP
     end
@@ -106,7 +124,10 @@ function hmdel(inmap, outmap)
       end
     end
     o.num = num
-    return v, true
+    if num > 0 then
+      return v, true
+    end
+    return nil, true
   end
   return hkv(inmap, outmap, fn, true)
 end
@@ -193,10 +214,10 @@ function hdel(inmap, outmap)
     if v[key] then
       v[key] = nil
       o.num = 1
-    else
-      o.num = 0
+      return v, true
     end
-    return v, true
+    o.num = 0
+    return nil, true
   end
   return hkv(inmap, outmap, fn, true)
 end
@@ -369,7 +390,7 @@ function skv(inmap, outmap, fn, atomic, readonly)
     local new_value
     new_value, ok = fn(key, value_tbl, inmap, outmap)
     if ok and new_value then
-      return kt.mapdump(new_value), xt
+      return kt.mapdump(new_value), _preserve_xt(xt)
     else
       return kt.Visitor.NOP
     end
@@ -536,7 +557,7 @@ function svv(inmap, outmap, fn)
     for _, val in pairs(outmap) do
       dest_tbl[val] = ''
     end
-    if not db:set(inmap.dest, kt.mapdump(dest_tbl), xt) then
+    if not db:set(inmap.dest, kt.mapdump(dest_tbl), _preserve_xt(xt)) then
       return kt.RVEINTERNAL
     end
   end
@@ -623,7 +644,7 @@ function lkv(inmap, outmap, fn, atomic, readonly)
     local new_value
     new_value, ok = fn(key, value_array, inmap, outmap)
     if ok and new_value then
-      return kt.arraydump(new_value), xt
+      return kt.arraydump(new_value), _preserve_xt(xt)
     else
       return kt.Visitor.NOP
     end
@@ -807,6 +828,9 @@ end
 -- returns: { value }
 function llpop(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
+    if #arr == 0 then
+      return nil, true
+    end
     outmap.value = arr[1]
     table.remove(arr, 1)
     return arr, true
@@ -820,6 +844,9 @@ end
 -- returns: { value }
 function lrpop(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
+    if #arr == 0 then
+      return nil, true
+    end
     outmap.value = arr[#arr]
     arr[#arr] = nil
     return arr, true
@@ -843,7 +870,7 @@ function _lpoppush(inmap, outmap, operation)
   if src == dest then
     local function visit(key, value, xt)
       if not value then
-        return kt.NOP
+        return kt.Visitor.NOP
       end
 
       local value_array = kt.arrayload(value)
@@ -852,7 +879,7 @@ function _lpoppush(inmap, outmap, operation)
       if n == 0 then
         -- Account for the possibility that the serialized value is non-empty,
         -- but the list itself is empty.
-        return kt.NOP
+        return kt.Visitor.NOP
       end
 
       if operation == 1 then
@@ -867,14 +894,14 @@ function _lpoppush(inmap, outmap, operation)
         table.insert(value_array, item)
       end
 
-      return kt.arraydump(value_array), xt
+      return kt.arraydump(value_array), _preserve_xt(xt)
     end
     ok = db:accept(src, visit)
   else
     local function visit(key, value, xt)
       -- Either we have no item to pop, or we have no item to write.
       if (key == src and not value) or (key == dest and not item) then
-        return kt.NOP
+        return kt.Visitor.NOP
       end
 
       local value_array = {}
@@ -884,7 +911,7 @@ function _lpoppush(inmap, outmap, operation)
         local n = #value_array
         if n == 0 then
           -- Serialized list is empty, nothing to do.
-          return kt.NOP
+          return kt.Visitor.NOP
         end
         if operation == 1 then
           -- RPOPLPUSH, move tail to head.
@@ -904,7 +931,7 @@ function _lpoppush(inmap, outmap, operation)
           table.insert(value_array, item)
         end
       end
-      return kt.arraydump(value_array), xt
+      return kt.arraydump(value_array), _preserve_xt(xt)
     end
     ok = db:accept_bulk({ src, dest }, visit)
   end
@@ -983,11 +1010,18 @@ function lremrange(inmap, outmap)
     end
     if start > stop then start, stop = stop, start end
 
+    local removed = false
     for i = stop, start, -1 do
-      table.remove(arr, i)
+      if arr[i] ~= nil then
+        table.remove(arr, i)
+        removed = true
+      end
     end
     outmap.length = #arr
-    return arr, true
+    if removed then
+      return arr, true
+    end
+    return nil, true
   end
   return lkv(inmap, outmap, fn, true)
 end
@@ -1182,7 +1216,7 @@ function move(inmap, outmap)
 
     -- Operating on dest key, store value and xt.
     if src_val then
-      return src_val, src_xt
+      return src_val, _preserve_xt(src_xt)
     end
     return kt.Visitor.NOP
   end
@@ -1331,7 +1365,6 @@ function queue_transfer(inmap, outmap)
     local n = tonumber(inmap.n) or 1
     local num = 0
     local key = string.format("%s\t", queue)
-    local pattern = string.format("^%s\t", queue)
     local score_start = string.len(queue) + 2  -- First byte after "\t".
     local score_end = score_start + 11  -- read 12 bytes.
 
@@ -1353,7 +1386,7 @@ function queue_transfer(inmap, outmap)
       if not k then break end
 
       -- If this is not a queue item key, we are done.
-      if not k:match(pattern) then break end
+      if not _starts_with(k, key) then break end
 
       -- Add item to the outmap, returning value to user.
       o[tostring(num)] = v
@@ -1440,7 +1473,6 @@ function _queue_iter(db, queue, n, callback)
   local num = 0
   local cursor = db:cursor()
   local key = string.format("%s\t", queue)
-  local pattern = string.format("^%s\t", queue)
 
   local score_start = string.len(queue) + 2  -- First byte after "\t".
   local score_end = score_start + 11  -- read 12 bytes.
@@ -1460,7 +1492,7 @@ function _queue_iter(db, queue, n, callback)
     if not k then break end
 
     -- If this is not a queue item key, we are done.
-    if not k:match(pattern) then break end
+    if not _starts_with(k, key) then break end
 
     -- Extract the score of the item.
     local score = tonumber(string.sub(k, score_start, score_end))
@@ -1488,7 +1520,7 @@ function _queue_iter_reverse(db, queue, n, callback)
   local num = 0
   local cursor = db:cursor()
   local max_key = string.format("%s\t\255", queue)
-  local pattern = string.format("^%s\t", queue)
+  local prefix = string.format("%s\t", queue)
 
   local score_start = string.len(queue) + 2  -- First byte after "\t".
   local score_end = score_start + 11  -- read 12 bytes.
@@ -1509,7 +1541,7 @@ function _queue_iter_reverse(db, queue, n, callback)
 
     -- If this is a queue item key, we remove the value (which implicitly steps
     -- to the next key).
-    if not k:match(pattern) then break end
+    if not _starts_with(k, prefix) then break end
 
     -- Extract the score of the item.
     local score = tonumber(string.sub(k, score_start, score_end))
@@ -1901,6 +1933,7 @@ function hx_query(inmap, outmap)
   local key, value, xt
   while true do
     key, value, xt = cursor:get()
+    if not key then break end
     if key > stop then break end
     _hx_key_to_table(outmap, key, i, s == nil, p == nil, o == nil)
     i = i + 1
@@ -1950,7 +1983,7 @@ if cmsgpack ~= nil then
       -- Unpack the msgpack-serialized data into separate keys/values.
       local unpacked = cmsgpack.unpack(value)
       for k, v in pairs(unpacked) do
-        if not db:set(k, cmsgpack.pack(v), xt) then
+        if not db:set(k, cmsgpack.pack(v), _preserve_xt(xt)) then
           kt.log('system', 'error setting key in unpack_packed_key()')
           return kt.RVEINTERNAL
         end
@@ -2128,7 +2161,6 @@ function schedule_read(inmap, outmap)
 
   local cursor = db:cursor()
   local start_key = string.format("%s\t", key)
-  local pattern = string.format("^%s\t", key)
 
   if not cursor:jump(start_key) then
     -- No data, we're done.
@@ -2148,7 +2180,7 @@ function schedule_read(inmap, outmap)
     if not k then break end
 
     -- If this is not a queue item key, we are done.
-    if not k:match(pattern) then break end
+    if not _starts_with(k, start_key) then break end
 
     -- Extract the score from the key. If it is higher than the score provided
     -- by the caller, we are done.

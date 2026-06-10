@@ -15,7 +15,8 @@ else:
 
 serializer = Extension('ukt.serializer', sources=[python_source])
 
+# Package discovery is configured in pyproject.toml; specifying packages here
+# as well would override it and drop the ukt.scripts subpackage from dists.
 setup(
     name='ukt',
-    packages=['ukt'],
     ext_modules=cythonize([serializer]))
