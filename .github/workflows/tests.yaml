@@ -15,6 +15,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: build ktserver
         run: |
+          sudo apt-get update
           sudo apt-get install liblzo2-dev libnsl-dev liblzma-dev lua5.1 liblua5.1-0-dev
           wget https://dbmx.net/kyotocabinet/pkg/kyotocabinet-1.2.80.tar.gz
           tar xzf kyotocabinet-1.2.80.tar.gz
