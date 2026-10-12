@@ -8,9 +8,6 @@ from cpython.unicode cimport PyUnicode_DecodeUTF8
 from cpython.version cimport PY_MAJOR_VERSION
 from libc.stdint cimport uint32_t
 from libc.stdint cimport uint64_t
-from libc.stdlib cimport free
-from libc.stdlib cimport malloc
-from libc.string cimport memcpy
 
 import io
 
@@ -97,11 +94,7 @@ def _deserialize_dict(raw_data, deserialize=True):
         bytes data = encode(raw_data)
         bytes bkey, bval
         char *buf
-        char *kbuf = <char *>malloc(128 * sizeof(char))
-        char *vbuf = <char *>malloc(1024 * sizeof(char))
         dict accum = {}
-        size_t kitemsize = 128
-        size_t vitemsize = 1024
         size_t kstep, vstep
         uint64_t knum, vnum
 
@@ -109,50 +102,26 @@ def _deserialize_dict(raw_data, deserialize=True):
     PyBytes_AsStringAndSize(data, &buf, &buflen)
 
     while buflen > 0:
-        # Read a variable-sized integer from the data buffer. The number of
-        # bytes used to encode the number is returned as "kstep", and the
-        # number itself is stored in "knum".
+        # Read the key and value sizes, which are variable-sized integers. The
+        # number of bytes used to encode each is returned as the step.
         kstep = _readvarnum(<unsigned char *>buf, buflen, &knum)
-
-        if buflen < kstep + knum:
-            free(kbuf); free(vbuf)
-            raise ValueError('corrupt key, refusing to process')
-
-        # Move the data pointer forward to the start of the value size.
         buf += kstep
         buflen -= kstep
-
         vstep = _readvarnum(<unsigned char *>buf, buflen, &vnum)
-
-        if buflen < vstep + knum + vnum :
-            free(kbuf); free(vbuf)
-            raise ValueError('corrupt value, refusing to process')
-
-        # Move to start of key data.
         buf += vstep
         buflen -= vstep
 
-        # Can we reuse our item buffer?
-        if knum > kitemsize:
-            free(kbuf)
-            kbuf = <char *>malloc(knum * sizeof(unsigned char))
-            kitemsize = knum
-        memcpy(kbuf, buf, knum)
-        bkey = kbuf[:knum]
-
-        # Move to start of value.
+        # Compare each size against the bytes left. Adding them to the step
+        # instead could overflow and pass a corrupt size.
+        if knum > <uint64_t>buflen:
+            raise ValueError('corrupt key, refusing to process')
+        bkey = buf[:knum]
         buf += knum
         buflen -= knum
 
-        if vnum > vitemsize:
-            free(vbuf)
-            vbuf = <char *>malloc(vnum * sizeof(unsigned char))
-            vitemsize = vnum
-
-        memcpy(vbuf, buf, vnum)
-        bval = vbuf[:vnum]
-
-        # Move to end of value.
+        if vnum > <uint64_t>buflen:
+            raise ValueError('corrupt value, refusing to process')
+        bval = buf[:vnum]
         buf += vnum
         buflen -= vnum
 
@@ -160,11 +129,6 @@ def _deserialize_dict(raw_data, deserialize=True):
             accum[_decode(bkey)] = _decode(bval)
         else:
             accum[_decode(bkey)] = bval
-
-    if kbuf:
-        free(kbuf)
-    if vbuf:
-        free(vbuf)
 
     return accum
 
@@ -198,9 +162,7 @@ def _deserialize_list(raw_data, deserialize=True):
         bytes data = encode(raw_data)
         bytes bitem
         char *buf
-        char *item = <char *>malloc(1024 * sizeof(char))
         list accum = []
-        size_t itemsize = 1024
         size_t step
         uint64_t num
 
@@ -212,32 +174,20 @@ def _deserialize_list(raw_data, deserialize=True):
         # bytes used to encode the number is returned as "step", and the number
         # itself is stored in "num".
         step = _readvarnum(<unsigned char *>buf, buflen, &num)
-
-        if buflen < step + num:
-            free(item)
-            raise ValueError('corrupt array item, refusing to process')
-
-        # Move the data pointer forward to the start of the data.
         buf += step
         buflen -= step
 
-        # Can we reuse our item buffer?
-        if num > itemsize:
-            free(item)
-            item = <char *>malloc(num * sizeof(unsigned char))
-            itemsize = num
+        # Compare against the bytes left, see _deserialize_dict.
+        if num > <uint64_t>buflen:
+            raise ValueError('corrupt array item, refusing to process')
+        bitem = buf[:num]
+        buf += num
+        buflen -= num
 
-        memcpy(item, buf, num)
-        bitem = item[:num]
         if deserialize:
             accum.append(_decode(bitem))
         else:
             accum.append(bitem)
-        buf += num
-        buflen -= num
-
-    if item:
-        free(item)
 
     return accum
 
