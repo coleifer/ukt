@@ -749,9 +749,7 @@ function lrange(inmap, outmap)
     local start = tonumber(inmap.start or "0") + 1
     if start < 1 then
       start = arrsize + start
-      if start < 1 then
-        return nil, true
-      end
+      if start < 1 then start = 1 end
     end
 
     local stop = inmap.stop
@@ -1000,16 +998,14 @@ function lremrange(inmap, outmap)
       end
     end
     if inmap.stop then
-      stop, ok = _normalize_index(#arr, inmap.stop)
-      if not ok then
+      -- Stop is exclusive, so it may equal the length of the list.
+      stop = tonumber(inmap.stop)
+      if stop < 0 then stop = #arr + stop end
+      if stop < 0 or stop > #arr then
         kt.log("system", "invalid stop index in lremrange()")
         return nil, false
-      elseif stop > 0 then
-        stop = stop - 1
       end
     end
-    if start > stop then start, stop = stop, start end
-
     local removed = false
     for i = stop, start, -1 do
       if arr[i] ~= nil then
@@ -1044,16 +1040,16 @@ end
 -- returns: { num }
 function lset(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
-    local idx = tonumber(inmap.index or "0")
     if not inmap.value then
       kt.log("info", "missing value for lset")
       return nil, false
     end
-    if idx < 0 or idx >= #arr then
+    local index, ok = _normalize_index(#arr, inmap.index)
+    if not ok then
       kt.log("info", "invalid index for lset")
       return nil, true
     end
-    arr[idx + 1] = inmap.value
+    arr[index] = inmap.value
     outmap['num'] = 1
     return arr, true
   end
@@ -1114,9 +1110,7 @@ function lunpack(inmap, outmap)
 
     if start < 1 then
       start = arrsize + start
-      if start < 1 then
-        return nil, true
-      end
+      if start < 1 then start = 1 end
     end
 
     local stop = inmap.stop

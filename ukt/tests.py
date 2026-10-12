@@ -132,7 +132,9 @@ class KyotoTycoonTests(object):
         self.assertEqual(len(self.db), 1)
         self.assertEqual(self.db.count(), 1)
         self.db['k1'] = 'v1'
-        self.db.update({'k2': 'v2', 'k3': 'v3'})
+        data = {'k2': 'v2'}
+        self.db.update(data, k3='v3')
+        self.assertEqual(data, {'k2': 'v2'})
         self.assertEqual(self.db.pop('k1'), 'v1')
         self.assertTrue(self.db.pop('k1') is None)
         self.assertEqual(sorted(list(self.db)), ['k2', 'k3', 'key'])
@@ -577,6 +579,14 @@ class TestSerializers(BaseTestCase):
 
     def test_serializer_json(self):
         self._test_serializer_object(KT_JSON)
+
+    def test_custom_codecs(self):
+        db = KyotoTycoon(self._server.host, self._server.port,
+                         serializer=KT_JSON, encode_value=lambda v: b'x' + v,
+                         decode_value=lambda b: b[1:])
+        db.set('k1', b'v1')
+        self.assertEqual(self.db.get_bytes('k1'), b'xv1')
+        self.assertEqual(db.get('k1'), b'v1')
 
     def test_serializer_pickle(self):
         self._test_serializer_object(KT_PICKLE)
@@ -1195,6 +1205,7 @@ class TestLua(BaseLuaTestCase):
         self.assertEqual(R(), all_items)
         self.assertEqual(R(start=0), all_items)
         self.assertEqual(R(start=-5), all_items)
+        self.assertEqual(R(start=-6), all_items)
         self.assertEqual(R(stop=5), all_items)
 
         # Within bounds.
@@ -1209,7 +1220,6 @@ class TestLua(BaseLuaTestCase):
 
         # Out-of-bounds or out-of-order.
         self.assertEqual(R(start=5), {})
-        self.assertEqual(R(start=-6), {})
         self.assertEqual(R(start=0, stop=0), {})
         self.assertEqual(R(start=-1, stop=3), {})
         self.assertEqual(R(start=3, stop=2), {})
@@ -1269,6 +1279,9 @@ class TestLua(BaseLuaTestCase):
 
     def test_script_list_items(self):
         self.assertEqual(self.db.script('list'), {})
+        data = {}
+        self.assertEqual(self.db.lua.list(data, db=0), {})
+        self.assertEqual(data, {})
 
         self.db.update(k1='v1', k2='v2', k3='v3')
         self.assertEqual(self.db.script('list'),
@@ -1766,7 +1779,7 @@ class TestLuaContainers(BaseLuaTestCase):
         l.append('i5-y')
         l.insert(-1, 'i4-y')
         self.assertEqual(l[:], ['i2', 'i3-x', 'i4-y', 'i5-y'])
-        l.set(3, 'i5-z')
+        l.set(-1, 'i5-z')
         self.assertEqual(l.pop(2), 'i4-y')
         self.assertEqual(l.pop(2), 'i5-z')
         self.assertEqual(len(l), 2)
@@ -1812,13 +1825,18 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(l.get_range(2, 4), ['i2', 'i3'])
         self.assertEqual(l.get_range(3, -3), ['i3', 'i4', 'i5', 'i6'])
         self.assertEqual(l.get_range(-3, -1), ['i7', 'i8'])
+        self.assertEqual(l.get_range(-20, 2), ['i0', 'i1'])
 
-        self.assertEqual(l.remove_range(8), 8)
+        self.assertEqual(l.remove_range(8, 10), 8)
         self.assertEqual(l.remove_range(3, 6), 5)
         self.assertEqual(l.get_range(), ['i0', 'i1', 'i2', 'i6', 'i7'])
 
         self.assertEqual(l.remove_range(-3, -1), 3)
         self.assertEqual(l.get_range(), ['i0', 'i1', 'i7'])
+
+        # Empty or reversed ranges remove nothing.
+        self.assertEqual(l.remove_range(1, 1), 3)
+        self.assertEqual(l.remove_range(2, 1), 3)
 
         self.assertEqual(l.remove_range(-3, 1), 2)
         self.assertEqual(l.get_range(), ['i1', 'i7'])
@@ -1908,6 +1926,11 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(self.db.get_bulk(list(expected)), expected)
         self.assertEqual(self.db['p1:00'], 'i3')
         self.assertEqual(self.db['p1:03'], 'i6')
+
+        # A negative start before the head is clamped.
+        self.assertEqual(l.unpack(-20, 2, 'p2:'), 2)
+        self.assertEqual(self.db.get_bulk(['p2:0000', 'p2:0001']),
+                         {'p2:0000': 'i0', 'p2:0001': 'i1'})
 
     def test_list_pack(self):
         l = self.db.List('l1')
