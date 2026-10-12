@@ -123,7 +123,9 @@ class SignalQueue(object):
             value = self.client.encode_value(value)
         data = {'key': fullkey, 'value': value}
         if expire_time is not None:
-            data['xt'] = str(expire_time)
+            # Imported here because ukt.client imports this module.
+            from ukt.client import convert_xt
+            data['xt'] = str(convert_xt(expire_time))
 
         r, s = self.client._request('/add', data, self.db, (450,),
                                     decode_keys=False, signal=self.signal,

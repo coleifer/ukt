@@ -89,7 +89,9 @@ class EmbeddedServer(object):
 
     def run(self):
         """
-        Run ktserver on a random high port and return a client connected to it.
+        Run ktserver in a sub-process. Returns True once it accepts
+        connections, or False if it is already running. Raises KTError if it
+        fails to start.
         """
         if not self._server_terminated.is_set():
             logger.warning('server already running')

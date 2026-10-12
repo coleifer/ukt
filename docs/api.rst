@@ -847,7 +847,9 @@ Kyoto Tycoon client
     :param int db: database index.
 
     Priority queue implementation using lua functions (provided in
-    the ``scripts/kt.lua`` module).
+    the ``scripts/kt.lua`` module). Requires an ordered database, such as
+    ``%`` or a ``.kct`` file. On a hash database, items can be added but are
+    never read back.
 
     .. py:method:: add(item, score=None)
 
@@ -967,7 +969,8 @@ Kyoto Tycoon client
     :param int db: database index.
 
     Prioritized schedule implementation using lua functions (provided in
-    the ``scripts/kt.lua`` module).
+    the ``scripts/kt.lua`` module). Like :py:class:`Queue`, requires an
+    ordered database.
 
     .. py:method:: add(item, score=0)
 
@@ -1101,7 +1104,7 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
     .. py:method:: pack(start=None, stop=None, count=None)
 
         :param str start: start key, or will be first key in the database
-        :param str stop: stop key, or will be last key in the database
+        :param str stop: stop key (exclusive), or the end of the database
         :param int count: limit number of keys to pack
         :return: number of keys that were packed
 
@@ -1311,7 +1314,7 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
     .. py:method:: pack(start=None, stop=None, count=None)
 
         :param str start: start key, or will be first key in the database
-        :param str stop: stop key, or will be last key in the database
+        :param str stop: stop key (exclusive), or the end of the database
         :param int count: limit number of keys to pack
         :return: number of keys that were packed
 
@@ -1488,13 +1491,17 @@ Embedded Servers
 
     .. py:method:: run()
 
-        :return: boolean indicating if server successfully started
+        :return: ``True`` once the server accepts connections, or ``False``
+            if it was already running.
+        :raises KTError: if the server fails to start.
 
         Run ``ktserver`` in a sub-process.
 
-    .. py:method:: stop()
+    .. py:method:: stop(wait=False)
 
-        :return: boolean indicating if server was stopped
+        :param bool wait: wait for the server process to exit.
+        :return: ``True`` if the server was stopped, or ``False`` if it was
+            not running.
 
         Stop the running embedded server.
 

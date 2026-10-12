@@ -518,10 +518,10 @@ class TestCursor(BaseTestCase):
         self.assertEqual(list(c), [('k2', 'v2-b'), ('k3', 'v3')])
 
     def test_cursor_fresh_connections(self):
-        # The server keeps cursors per-connection. With a tiny max_age, every
+        # The server keeps cursors per-connection. With max_age=0, every
         # pooled request gets a new connection, so a cursor must not depend
         # on the pool handing back the same one.
-        db = KyotoTycoon(self._server.host, self._server.port, max_age=1e-9)
+        db = KyotoTycoon(self._server.host, self._server.port, max_age=0)
         self.assertEqual(list(db.keys()), ['k1', 'k2', 'k3', 'k4'])
         self.assertEqual(list(db.values()), ['v1', 'v2', 'v3', 'v4'])
 
@@ -545,6 +545,13 @@ class TestCursor(BaseTestCase):
         self.assertTrue(c.jump('k3'))
         self.assertEqual(list(c), [('k3', 'v3'), ('k4', 'v4')])
         self.assertTrue(c._conn is None)
+
+    def test_cursor_empty_key(self):
+        self.db.set('', 'v0')
+        c = self.db.cursor()
+        self.assertTrue(c.jump_back(''))
+        self.assertEqual(c.get(), ('', 'v0'))
+        c.close()
 
     def test_cursor_connection_lost(self):
         c = self.db.cursor()
@@ -1654,6 +1661,10 @@ class TestLuaContainers(BaseLuaTestCase):
         self.db.set_bulk(data)
         self.assertEqual(h.pack(), 10)
         self.assertEqual(h.get_all(), data)
+
+        # Packing again skips the hash's own key.
+        self.assertEqual(h.pack(), 10)
+        self.assertEqual(h.get_all(), data)
         h.clear()
 
         h = self.db.Hash('a1')
@@ -1779,6 +1790,19 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(s1.difference(s2, dest=sx), set(('k1', 'k2')))
         self.assertEqual(sx.members(), set(('k1', 'k2')))
         sx.clear()
+
+    def test_set_dest_expire_time(self):
+        # The result keeps the expire time of the first set.
+        s1 = self.db.Set('s1')
+        s2 = self.db.Set('s2')
+        s1.add('a', 'b')
+        s2.add('a')
+        self.db.touch('s2', 30)
+        s1.intersection(s2, dest='sd')
+        self.assertEqual(self.db.expire_time('sd'), self.db.expire_time('s1'))
+        self.db.touch('s1', 60)
+        s1.union(s2, dest='sd')
+        self.assertEqual(self.db.expire_time('sd'), self.db.expire_time('s1'))
 
     def test_list(self):
         l = self.db.List('l1')
@@ -1966,6 +1990,10 @@ class TestLuaContainers(BaseLuaTestCase):
         self.db.set_bulk({'k%02d' % i: 'i%s' % i for i in range(10)})
         self.assertEqual(l.pack(), 10)
         self.assertEqual(l.get_range(), ['i%s' % i for i in range(10)])
+
+        # Packing again skips the list's own key.
+        self.assertEqual(l.pack(), 10)
+        self.assertEqual(l.get_range(), ['i%s' % i for i in range(10)] * 2)
         l.clear()
 
         l = self.db.List('a1')
@@ -2661,12 +2689,22 @@ class TestSignalQueue(BaseTestCase):
 
     def test_signal_queue_fresh_connections(self):
         # See TestCursor.test_cursor_fresh_connections.
-        db = KyotoTycoon(self._server.host, self._server.port, max_age=1e-9)
+        db = KyotoTycoon(self._server.host, self._server.port, max_age=0)
         sq = db.SignalQueue('sq')
         ok, _ = sq.produce('item1')
         self.assertTrue(ok)
         self.assertEqual(sq.consume(wait=1), 'item1')
         db.close_all()
+
+    def test_signal_queue_expire_time(self):
+        sq = self.db.SignalQueue('sq')
+        for xt in (datetime.timedelta(seconds=300),
+                   datetime.datetime.now() + datetime.timedelta(seconds=300)):
+            sq.produce('item', expire_time=xt)
+            key, = self.db.match_prefix('sq:')
+            ttl = self.db.expire_time(key) - time.time()
+            self.assertTrue(abs(ttl - 300) < 2)
+            sq.flush()
 
     def test_signal_queue_lost_race(self):
         # Another consumer takes the item after this one reads its key.
@@ -2744,6 +2782,13 @@ class TestConnectionPool(BaseTestCase):
 
         self.db.close_all()
         self.assertEqual(p.stats, (0, 0, 0, 0))
+
+    def test_pool_max_age_zero(self):
+        # max_age=0 disables connection reuse.
+        db = KyotoTycoon(self._server.host, self._server.port, max_age=0)
+        self.assertEqual(db.set('k1', 'v1'), 1)
+        self.assertTrue(db.exists('k1'))
+        self.assertEqual(db.pool.stats, (0, 0, 0, 0))
 
     def test_pool_checkin_after_disconnect(self):
         p = self.db.pool

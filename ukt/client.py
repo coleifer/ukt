@@ -198,7 +198,7 @@ class Pool(object):
         self.host = host
         self.port = port
         self.timeout = timeout
-        self.max_age = max_age or 3600
+        self.max_age = max_age
 
         # We keep two sets of sockets around - one for the binary protocol, and
         # another for the HTTP protocol.
@@ -244,12 +244,14 @@ class Pool(object):
                 if ts > threshold:
                     in_use[sock] = ts
                     return sock
-                else:
-                    sock.close()
+                sock.close()
 
-            sock = constructor()
+        # Connect outside the lock, so a slow connect does not block other
+        # threads' checkouts and checkins.
+        sock = constructor()
+        with self._lock:
             in_use[sock] = time.time()
-            return sock
+        return sock
 
     def checkin(self, sock, http=False):
         threshold = time.time() - self.max_age
@@ -1306,12 +1308,12 @@ class KyotoTycoon(object):
         return resp, status
 
     def cur_jump(self, cursor_id, key=None, db=None, **kw):
-        data = {'key': key} if key else {}
+        data = {} if key is None else {'key': key}
         _, s = self._cursor_command('cur_jump', cursor_id, data, db, **kw)
         return s == 200
 
     def cur_jump_back(self, cursor_id, key=None, db=None, **kw):
-        data = {'key': key} if key else {}
+        data = {} if key is None else {'key': key}
         _, s = self._cursor_command('cur_jump_back', cursor_id, data, db, **kw)
         return s == 200
 

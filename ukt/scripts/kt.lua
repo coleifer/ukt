@@ -311,8 +311,10 @@ function hpack(inmap, outmap)
       local key, value = cur:get(true)
       if not key then break end
       if stop and key >= stop then break end
-      v[key] = value
-      n = n + 1
+      if key ~= k then
+        v[key] = value
+        n = n + 1
+      end
     end
 
     cur:disable()
@@ -543,8 +545,8 @@ function svv(inmap, outmap, fn)
     return kt.RVEINVALID
   end
   local db = _select_db(inmap) -- Allow db to be specified as argument.
-  local value1, xt = db:get(key1)
-  local value2, xt = db:get(key2)
+  local value1, xt1 = db:get(key1)
+  local value2 = db:get(key2)
 
   local value_tbl1 = {}
   local value_tbl2 = {}
@@ -557,7 +559,7 @@ function svv(inmap, outmap, fn)
     for _, val in pairs(outmap) do
       dest_tbl[val] = ''
     end
-    if not db:set(inmap.dest, kt.mapdump(dest_tbl), _preserve_xt(xt)) then
+    if not db:set(inmap.dest, kt.mapdump(dest_tbl), _preserve_xt(xt1)) then
       return kt.RVEINTERNAL
     end
   end
@@ -1132,11 +1134,13 @@ function lpack(inmap, outmap)
     end
 
     while count > n do
-      local key, value = cur:get(true)
-      if not key then break end
-      if stop and key >= stop then break end
-      table.insert(arr, value)
-      n = n + 1
+      local k, value = cur:get(true)
+      if not k then break end
+      if stop and k >= stop then break end
+      if k ~= key then
+        table.insert(arr, value)
+        n = n + 1
+      end
     end
 
     cur:disable()
