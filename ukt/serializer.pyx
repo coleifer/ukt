@@ -105,9 +105,13 @@ def _deserialize_dict(raw_data, deserialize=True):
         # Read the key and value sizes, which are variable-sized integers. The
         # number of bytes used to encode each is returned as the step.
         kstep = _readvarnum(<unsigned char *>buf, buflen, &knum)
+        if kstep == 0:
+            raise ValueError('corrupt key, refusing to process')
         buf += kstep
         buflen -= kstep
         vstep = _readvarnum(<unsigned char *>buf, buflen, &vnum)
+        if vstep == 0:
+            raise ValueError('corrupt value, refusing to process')
         buf += vstep
         buflen -= vstep
 
@@ -173,6 +177,8 @@ def _deserialize_list(raw_data, deserialize=True):
         # bytes used to encode the number is returned as "step", and the number
         # itself is stored in "num".
         step = _readvarnum(<unsigned char *>buf, buflen, &num)
+        if step == 0:
+            raise ValueError('corrupt array item, refusing to process')
         buf += step
         buflen -= step
 
@@ -247,6 +253,8 @@ cdef inline int _writevarnum(unsigned char *buf, uint64_t num):
     return 0
 
 
+# Returns the number of bytes read, or 0 if the data ends before the last
+# byte of the number.
 cdef inline size_t _readvarnum(unsigned char *buf, size_t size, uint64_t *np):
     cdef:
         unsigned char *rp = buf
@@ -255,13 +263,11 @@ cdef inline size_t _readvarnum(unsigned char *buf, size_t size, uint64_t *np):
         uint32_t c
 
     while rp < ep:
-        if rp >= ep:
-            np[0] = 0
-            return 0
         c = rp[0]
         num = (num << 7) + (c & 0x7f)
         rp += 1
         if c < 0x80:
-            break
-    np[0] = num
-    return rp - <unsigned char *>buf
+            np[0] = num
+            return rp - buf
+    np[0] = 0
+    return 0

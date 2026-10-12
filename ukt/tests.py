@@ -2313,6 +2313,15 @@ class TestLuaHexastore(BaseLuaTestCase):
 
 
 class TestLuaQueue(BaseLuaTestCase):
+    def test_queue_unreadable_item(self):
+        # Items before a key that is not a queue item are returned, then reads
+        # fail instead of looking like an empty queue.
+        q = self.db.Queue('q')
+        q.extend(['i1', 'i2'])
+        self.db.set('q\tbad', 'x')
+        self.assertEqual(q.pop(n=5), ['i1', 'i2'])
+        self.assertRaises(ProtocolError, q.pop)
+
     def test_queue_pattern_chars(self):
         # Queue names containing lua pattern characters work correctly.
         q = self.db.Queue('test-queue.1%')
@@ -2790,6 +2799,10 @@ class TestConnectionPool(BaseTestCase):
         self.assertTrue(db.exists('k1'))
         self.assertEqual(db.pool.stats, (0, 0, 0, 0))
 
+        # max_age=None uses the default.
+        db = KyotoTycoon(self._server.host, self._server.port, max_age=None)
+        self.assertTrue(db.exists('k1'))
+
     def test_pool_checkin_after_disconnect(self):
         p = self.db.pool
         sock = p.checkout()
@@ -2962,12 +2975,13 @@ class TestArrayMapSerialization(unittest.TestCase):
         self.assertEqual(deserialize(b''), [])
 
     def test_corrupt_sizes(self):
-        # Sizes larger than the data are rejected, including ones near 2**64.
+        # Sizes larger than the data are rejected, including ones near 2**64,
+        # as are sizes cut off by the end of the data.
         huge = b'\x81' + b'\xff' * 8 + b'\x7f'
-        for data in (huge + b'x' * 16, b'\x05abc'):
+        for data in (huge + b'x' * 16, b'\x05abc', b'\x01a\x80'):
             self.assertRaises(ValueError, self.db.deserialize_list, data)
         for data in (huge + b'\x00' + b'x' * 16, b'\x00' + huge + b'x' * 16,
-                     b'\x05\x05abcde'):
+                     b'\x05\x05abcde', b'\x00'):
             self.assertRaises(ValueError, self.db.deserialize_dict, data)
 
 

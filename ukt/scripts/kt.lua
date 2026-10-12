@@ -1411,7 +1411,9 @@ end
 -- reverse. fn(key, value, num) runs inside the record lock, so it must not
 -- call db methods. It returns (remove, count). The record is removed under
 -- the same lock fn ran in, so concurrent consumers never get the same record.
--- count advances num towards n, and returning nil stops. Returns num.
+-- count advances num towards n, and returning nil stops. Returns num. An
+-- error in fn is raised after the cursor is closed. If records were already
+-- counted, they are returned instead, and the next call meets the error.
 function _prefix_iter(db, prefix, n, fn, reverse)
   local cursor = db:cursor()
   local ok
@@ -1422,10 +1424,15 @@ function _prefix_iter(db, prefix, n, fn, reverse)
   end
 
   local num = 0
-  local remove, count
+  local remove, count, err
   local visit = function(k, v)
     remove, count = nil, false
-    if _starts_with(k, prefix) then remove, count = fn(k, v, num) end
+    if _starts_with(k, prefix) then
+      -- The server discards errors raised in a visitor, so catch them here.
+      local fn_ok
+      fn_ok, remove, count = pcall(fn, k, v, num)
+      if not fn_ok then err, remove, count = remove, nil, false end
+    end
     if remove then return kt.Visitor.REMOVE end
     return kt.Visitor.NOP
   end
@@ -1444,6 +1451,7 @@ function _prefix_iter(db, prefix, n, fn, reverse)
   end
 
   cursor:disable()
+  if err and num == 0 then error(err, 0) end
   return num
 end
 

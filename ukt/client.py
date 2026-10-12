@@ -198,7 +198,7 @@ class Pool(object):
         self.host = host
         self.port = port
         self.timeout = timeout
-        self.max_age = max_age
+        self.max_age = 3600 if max_age is None else max_age
 
         # We keep two sets of sockets around - one for the binary protocol, and
         # another for the HTTP protocol.
@@ -219,7 +219,11 @@ class Pool(object):
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         if self.timeout:
             sock.settimeout(self.timeout)
-        sock.connect((self.host, self.port))
+        try:
+            sock.connect((self.host, self.port))
+        except OSError:
+            sock.close()
+            raise
         return Socket(sock)
 
     def create_http_client(self):
@@ -260,13 +264,13 @@ class Pool(object):
             # connection was checked-out, in which case it is just closed.
             if http:
                 ts = self.in_use_http.pop(sock, None)
-                if ts is None or ts < threshold:
+                if ts is None or ts <= threshold:
                     sock.close()
                 elif sock.sock is not None:
                     heapq.heappush(self.free_http, (ts, next(self._seq), sock))
             else:
                 ts = self.in_use.pop(sock, None)
-                if ts is None or ts < threshold:
+                if ts is None or ts <= threshold:
                     sock.close()
                 elif not sock.is_closed:
                     heapq.heappush(self.free, (ts, next(self._seq), sock))
