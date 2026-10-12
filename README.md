@@ -31,7 +31,7 @@ $ pip install ukt
 
 >>> client.set_bulk({'k1': 'v1', 'k2': 'v2', 'k3': 'v3'})
 3
->>> client.get_bulk(['k1', 'xx, 'k3'])
+>>> client.get_bulk(['k1', 'xx', 'k3'])
 {'k1': 'v1', 'k3': 'v3'}
 >>> client.remove_bulk(['k1', 'xx', 'k3'])
 2

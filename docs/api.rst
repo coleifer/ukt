@@ -21,7 +21,7 @@ Serializers
 
 .. py:data:: KT_NONE
 
-    No serialization or deserialization. Values must be byte-strings.
+    No deserialization. Values are returned as byte-strings.
 
 .. py:data:: KT_PICKLE
 
@@ -40,11 +40,11 @@ Kyoto Tycoon client
     :param bool decode_keys: decode keys as utf8-encoded unicode.
     :param serializer: serialization method to use for storing/retrieving
         values. Default is ``KT_BINARY``, which treats values as utf8-encoded
-        unicode. ``KT_NONE`` disables all serialization, or use one of
+        unicode. ``KT_NONE`` disables deserialization, or use one of
         ``KT_JSON``, ``KT_MSGPACK`` or ``KT_PICKLE``.
     :param encode_value: custom serializer for encoding values as bytestrings.
     :param decode_value: custom deserializer for decoding bytestrings.
-    :param int max_age: max idle time for socket in connection pool.
+    :param int max_age: max age of socket in connection pool.
 
     Client for interacting with Kyoto Tycoon database.
 
@@ -53,10 +53,8 @@ Kyoto Tycoon client
         :param int db: database index.
 
         Set the default database for the client. The Kyoto Tycoon server can be
-        run by specifying multiple database paths. This method allows you to
-        specify which database the client communicates with by default, though
-        most methods accept a ``db`` parameter which can override the default
-        for a given call.
+        run by specifying multiple database paths. Most methods accept a ``db``
+        parameter which can override the default for a given call.
 
     .. py:method:: close_all()
 
@@ -69,7 +67,7 @@ Kyoto Tycoon client
         * HTTP client connections for the HTTP API.
 
         Since the binary protocol only implements a subset of the total
-        commands, *ukt* will transparently use the appropriate connection type
+        commands, ukt will transparently use the appropriate connection type
         for a given method.
 
     .. py:method:: serialize_dict(d, encode_values=True)
@@ -91,8 +89,8 @@ Kyoto Tycoon client
         :return: data ``dict``.
 
         Deserialize a sequence of bytes into a dictionary, optionally decoding
-        the values as unicode strings. Compatible with KT's built-in lua
-        ``mapload`` function and the :py:class:`Hash` container type.
+        the values. Compatible with KT's built-in lua ``mapload`` function and
+        the :py:class:`Hash` container type.
 
     .. py:method:: serialize_list(l, encode_values=True)
 
@@ -112,9 +110,9 @@ Kyoto Tycoon client
             serialization scheme.
         :return: data ``list``.
 
-        Deserialize a a sequence of bytes into a list, optionally decoding the
-        values as unicode strings. Compatible with KT's built-in lua
-        ``arrayload`` function and the :py:class:`List` container type.
+        Deserialize a sequence of bytes into a list, optionally decoding the
+        values. Compatible with KT's built-in lua ``arrayload`` function and
+        the :py:class:`List` container type.
 
     .. py:method:: get_bulk(keys, db=None, decode_values=True)
 
@@ -154,8 +152,8 @@ Kyoto Tycoon client
         :param int db: database index
         :return: raw bytestring value or ``None`` if key does not exist.
 
-        Fetch the value for the given key. The resulting value will **not**
-        be deserialized.
+        Fetch the value for the given key. The resulting value will not be
+        deserialized.
 
     .. py:method:: set_bulk(data, db=None, expire_time=None, no_reply=False, encode_values=True)
 
@@ -223,7 +221,7 @@ Kyoto Tycoon client
 
     .. py:method:: remove_bulk_details(db_key_list, no_reply=False)
 
-        :param db_key_list: a list of 2-tuples to retrieve: ``(db index, key)``
+        :param db_key_list: a list of 2-tuples: ``(db index, key)``
         :param bool no_reply: execute the operation without a server
             acknowledgment.
         :return: number of keys that were removed
@@ -337,8 +335,8 @@ Kyoto Tycoon client
         :return: boolean indicating if key could be replaced or not.
         :rtype: bool
 
-        Replace a key/value pair to the database. This operation will only
-        succeed if the key alreadys exist in the database.
+        Replace a key/value pair in the database. This operation will only
+        succeed if the key already exists in the database.
 
     .. py:method:: append(key, value, db=None, expire_time=None, encode_value=True)
 
@@ -380,7 +378,7 @@ Kyoto Tycoon client
 
     .. py:method:: cas(key, old_val, new_val, db=None, expire_time=None, encode_value=True)
 
-        :param str key: key to append value to.
+        :param str key: key.
         :param old_val: original value to test.
         :param new_val: new value to store.
         :param int db: database index.
@@ -390,7 +388,7 @@ Kyoto Tycoon client
         :return: boolean indicating if compare-and-swap succeeded.
         :rtype: bool
 
-        Perform an atomic compare-and-set the value stored at a given key.
+        Perform an atomic compare-and-set on the value stored at a given key.
 
     .. py:method:: exists(key, db=None)
 
@@ -417,9 +415,8 @@ Kyoto Tycoon client
             serialization method.
         :return: value stored at given key or ``None`` if key does not exist.
 
-        Perform atomic get-and-remove the value stored in a given key. This
-        method is also available as :py:meth:`KyotoTycoon.pop` if that's easier
-        to remember.
+        Perform atomic get-and-remove of the value stored in a given key. This
+        method is also available as :py:meth:`KyotoTycoon.pop`.
 
     .. py:method:: vacuum(step=0, db=None)
 
@@ -437,7 +434,7 @@ Kyoto Tycoon client
         :return: list of keys that matched the given prefix.
         :rtype: list
 
-        Return sorted list of keys that match the given prefix.
+        Return list of keys that match the given prefix.
 
     .. py:method:: match_regex(regex, max_keys=None, db=None)
 
@@ -447,7 +444,7 @@ Kyoto Tycoon client
         :return: list of keys that matched the given regular expression.
         :rtype: list
 
-        Return sorted list of keys that match the given regular expression.
+        Return list of keys that match the given regular expression.
 
     .. py:method:: match_similar(origin, distance=None, max_keys=None, db=None)
 
@@ -480,10 +477,11 @@ Kyoto Tycoon client
 
     .. py:method:: ulog_remove(max_dt)
 
-        :param datetime max_dt: maximum datetime to preserve
+        :param datetime max_dt: maximum datetime of logs to remove
         :return: boolean indicating success
 
-        Removes all update-log files older than the given datetime.
+        Removes update-log files older than the given datetime, except the
+        current one.
 
     .. py:method:: count(db=None)
 
@@ -500,7 +498,7 @@ Kyoto Tycoon client
         :type db: int or None
         :return: size of database in bytes.
 
-        Property which exposes the size information returned by the
+        Exposes the size information returned by the
         :py:meth:`~KyotoTycoon.status` API.
 
     .. py:method:: __getitem__(key_or_keydb)
@@ -508,12 +506,10 @@ Kyoto Tycoon client
         Item-lookup based on either ``key`` or a 2-tuple consisting of
         ``(key, db)``. Follows same semantics as :py:meth:`~KyotoTycoon.get`.
 
-    .. py:method:: __setitem__(key_or_keydb, value_or_valueexpire)
+    .. py:method:: __setitem__(key_or_keydb, value)
 
         Item-setting based on either ``key`` or a 2-tuple consisting of
-        ``(key, db)``. Value consists of either a ``value`` or a 2-tuple
-        consisting of ``(value, expire_time)``. Follows same semantics
-        as :py:meth:`~KyotoTycoon.set`.
+        ``(key, db)``. Follows same semantics as :py:meth:`~KyotoTycoon.set`.
 
     .. py:method:: __delitem__(key_or_keydb)
 
@@ -537,7 +533,7 @@ Kyoto Tycoon client
         :return: number of keys that were set.
 
         Efficiently set or update multiple key/value pairs. Provided for
-        compatibility with ``dict`` interface. For more control use the
+        compatibility with ``dict`` interface. For more control use
         :py:meth:`~KyotoTycoon.set_bulk`.
 
     .. py:method:: pop(key, db=None, decode_value=True)
@@ -553,7 +549,7 @@ Kyoto Tycoon client
         :rtype: generator
 
         .. warning::
-            The :py:meth:`~KyotoCabinet.keys` method uses a cursor and can be
+            The :py:meth:`~KyotoTycoon.keys` method uses a cursor and can be
             very slow.
 
     .. py:method:: keys_nonlazy(db=None)
@@ -563,7 +559,7 @@ Kyoto Tycoon client
         :rtype: list
 
         Non-lazy implementation of :py:meth:`~KyotoTycoon.keys`.
-        Behind-the-scenes, calls :py:meth:`~KyotoTycoon.match_prefix` with an
+        Behind the scenes, calls :py:meth:`~KyotoTycoon.match_prefix` with an
         empty string as the prefix.
 
     .. py:method:: values(db=None)
@@ -590,8 +586,8 @@ Kyoto Tycoon client
         :param int db: database index.
         :return: old expire time or None if key not found.
 
-        Run a lua function (touch) defined in scripts/kt.lua that allows one
-        to update the TTL / expire time of a key.
+        Run a lua function (touch_bulk) defined in scripts/kt.lua that allows
+        one to update the TTL / expire time of a key.
 
         The old expire time is returned. If the key does not exist, then None
         is returned.
@@ -710,10 +706,10 @@ Kyoto Tycoon client
         Create a :py:class:`Schedule`, which provides efficient operations for
         implementing a sorted schedule.
 
-    .. py:method:: cursor(db=None, cursor_id=None)
+    .. py:method:: cursor(cursor_id=None, db=None)
 
-        :param int db: database index
         :param int cursor_id: cursor id (will be automatically created if None)
+        :param int db: database index
         :return: :py:class:`Cursor` object
 
 
@@ -902,14 +898,14 @@ Kyoto Tycoon client
         :return: either the item that was transferred or the list of items
             that was transferred, depending on ``n``.
 
-        Transfer items from the head of the queue to the tail of the
-        destination queue. Priority scores are preserved. If the source queue
-        is empty, then either ``None`` or an empty list will be returned
-        (depending on whether ``n=1``).
+        Transfer items from the head of the queue to the destination queue.
+        Priority scores are preserved. If the source queue is empty, then
+        either ``None`` or an empty list will be returned (depending on whether
+        ``n=1``).
 
     .. py:method:: set_priority(data, score, n=None)
 
-        :param data: value to remove from end of queue.
+        :param data: value to update.
         :param int score: new score for the item.
         :param int n: max occurrences to update.
 
@@ -945,7 +941,7 @@ Kyoto Tycoon client
         :return: a list of items
 
         Destructively read up-to ``n`` items from the schedule, whose item
-        score is below the given ``score``.
+        score is at or below the given ``score``.
 
     .. py:method:: clear()
 
@@ -970,7 +966,7 @@ Container types
 ---------------
 
 Simple container types that emulate Python or Redis types, and rely on Kyoto
-Tycoon's lua serialization helpers. Behind-the scenes, these types are using
+Tycoon's lua serialization helpers. Behind the scenes, these types are using
 lua functions to read the entire value into a Lua table and write it back.
 Because the full data must be deserialized for reading, and re-serialized for
 writing, all operations are O(n).
@@ -1049,7 +1045,7 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
     .. py:method:: contains(key)
 
         :param str key: key to check
-        :return: boolean indicating whether the given key exists.
+        :return: 1 if the given key exists, 0 otherwise.
 
     .. py:method:: unpack(prefix=None)
 
@@ -1057,8 +1053,8 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
         :return: number of keys that were written
 
         Unpack the key/value pairs in the hash into top-level key/value pairs
-        in the database, optionally prefixing the unpacked keys with the given
-        prefix.
+        in the database, prefixing the unpacked keys with the given prefix
+        (default ``key + ':'``).
 
     .. py:method:: pack(start=None, stop=None, count=None)
 
@@ -1099,7 +1095,7 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
 
         See :py:meth:`~Hash.set`.
 
-    .. py:method:: __detitem__()
+    .. py:method:: __delitem__()
 
         See :py:meth:`~Hash.remove`.
 
@@ -1109,7 +1105,8 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
 
     .. py:method:: get_raw()
 
-        :return: dictionary of all data stored in hash, or ``None`` if empty.
+        :return: dictionary of all data stored in hash, or ``None`` if the key
+            does not exist.
 
         Utilize a more-efficient implementation for fetching all data stored in
         the hash. Rather than going through Lua, we read the raw value of the
@@ -1163,8 +1160,7 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
         :return: a list of items corresponding to the given range.
 
         Slicing operation equivalent to Python's list slice behavior. If the
-        start or stop indices are out-of-bounds, the return value will be an
-        empty list.
+        start index is out-of-bounds, the return value will be an empty list.
 
     .. py:method:: index(index)
 
@@ -1244,7 +1240,7 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
 
     .. py:method:: set(index, value)
 
-        :param int index: index to set. Supports negative values.
+        :param int index: index to set.
         :param value: value to set at given index
 
         Set the value at the given index. If the index is out-of-bounds, an
@@ -1253,19 +1249,19 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
     .. py:method:: find(value)
 
         :param value: value to search for
-        :return: index of first occurrance of value starting from head of list.
+        :return: index of first occurrence of value starting from head of list.
 
     .. py:method:: rfind(value)
 
         :param value: value to search for
-        :return: index of first occurrance of value starting from tail of list.
+        :return: index of first occurrence of value starting from tail of list.
 
     .. py:method:: unpack(start=None, stop=None, prefix=None, fmt=None)
 
         :param int start: start index of range to unpack
         :param int stop: stop index of range to unpack
         :param str prefix: prefix for output values
-        :param str fmt: lua format-string for index, e.g. `'%08d'`.
+        :param str fmt: lua format-string for index, e.g. ``'%08d'``.
 
         Unpack the items in the list into top-level keys in the database. The
         key will begin with the provided prefix, and optionally accepts a
@@ -1297,13 +1293,14 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
 
         See :py:meth:`~List.set`.
 
-    .. py:method:: __detitem__()
+    .. py:method:: __delitem__()
 
         See :py:meth:`~List.remove`.
 
     .. py:method:: get_raw()
 
-        :return: list of all data stored in list, or ``None`` if empty.
+        :return: list of all data stored in list, or ``None`` if the key does
+            not exist.
 
         Utilize a more-efficient implementation for fetching all data stored in
         the list. Rather than going through Lua, we read the raw value of the
@@ -1340,7 +1337,7 @@ Embedded Servers
 
     .. code-block:: pycon
 
-        >>> from kt import EmbeddedServer
+        >>> from ukt import EmbeddedServer
         >>> server = EmbeddedServer()
         >>> server.run()
         True

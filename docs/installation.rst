@@ -3,7 +3,7 @@
 Installation
 ============
 
-*ukt* can be installed using ``pip``:
+ukt can be installed using ``pip``:
 
 .. code-block:: bash
 
@@ -12,7 +12,7 @@ Installation
 Dependencies
 ------------
 
-*ukt* has no dependencies. For development, you will need to install *cython*
+ukt has no dependencies. For development, you will need to install cython
 in order to build the serializer extension.
 
 Installing with git
@@ -29,14 +29,13 @@ To install the latest version with git:
 Installing Kyoto Tycoon
 -----------------------
 
-If you're using a debian-based linux distribution, you can install using
-``apt-get``:
+If you're using Debian 8 or Ubuntu 16.04, you can install using ``apt-get``:
 
 .. code-block:: bash
 
     $ sudo apt-get install kyototycoon
 
-Alternatively you can use the following Docker images:
+Alternatively you can use the following Docker image:
 
 .. code-block:: bash
 
@@ -45,4 +44,4 @@ Alternatively you can use the following Docker images:
 To build from source and read about the various command-line options, see the
 project documentation:
 
-* `Kyoto Tycoon documentation <http://fallabs.com/kyototycoon/>`_
+* `Kyoto Tycoon documentation <https://dbmx.net/kyototycoon/>`_

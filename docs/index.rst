@@ -8,8 +8,7 @@ ukt
 
 .. image:: logo.png
 
-*ukt* is a fast client library for use with `Kyoto Tycoon <http://fallabs.com/kyototycoon/>`_.
-*ukt* is designed to be performant and simple-to-use.
+ukt is a fast client library for use with `Kyoto Tycoon <https://dbmx.net/kyototycoon/>`_.
 
 * Full-featured implementation of protocol.
 * Performant serialization via C extension.

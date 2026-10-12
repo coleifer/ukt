@@ -3,9 +3,6 @@
 Tuning Kyoto Tycoon
 ===================
 
-These are notes based on the documentation and distilled into something
-hopefully a bit easier to follow.
-
 Supported by all databases:
 
 * ``log`` - path to logfile
@@ -23,10 +20,10 @@ Other options:
 * ``pccap`` - page-cache capacity
 * ``opts`` - s=small, l=linear, c=compress - l=linked-list for hash collisions.
 * ``zcomp`` - compression algorithm: zlib, def (deflate), gz, lzo, lzma or arc
-* ``zkey`` - cipher key for compression (?)
+* ``zkey`` - cipher key for the ``arc`` compressor
 * ``rcomp`` - comparator function: lex, dec (decimal), lexdesc, decdesc
 * ``apow`` - record alignment, as power of 2, e.g. apow=3 == 8 bytes.
-* ``fpow`` - maximum elements in the free-block pool
+* ``fpow`` - capacity of the free-block pool, as power of 2
 * ``dfunit`` - unit step for auto-defragmentation, default=0 (disabled).
 
 Databases and available parameters
@@ -36,19 +33,20 @@ Databases and available parameters
 * Cache hash (``*``): opts, bnum, zcomp, capcnt, capsiz, zkey
 * Cache tree (``%``): opts, bnum, zcomp, zkey, psiz, rcomp, pccap
 * File hash (``.kch``): opts, bnum, apow, fpow, msiz, dfunit, zcomp, zkey
-* File tree (``.kct``): opts, bnum, apow, fpow, msiz, dfunit, zcomp, zkey, psiz
+* File tree (``.kct``): opts, bnum, apow, fpow, msiz, dfunit, zcomp, zkey,
+  psiz, rcomp, pccap
 * Dir hash (``.kcd``): opts, zcomp, zkey
 * Dir tree (``.kcf``): opts, zcomp, zkey, psiz, rcomp, pccap
 * Plain-text (``.kcx``): n/a
-* Prototype hash (``-``): n/a, not recommended (std::unorderedmap)
+* Prototype hash (``-``): n/a, not recommended (std::unordered_map)
 * Prototype tree (``+``): n/a, not recommended (std::map)
 
-Information available here: https://fallabs.com/kyotocabinet/spex.html#tips
+Information available here: https://dbmx.net/kyotocabinet/spex.html#tips
 
 When choosing a database:
 
 * Do you need persistence? If not, use one of the in-memory databases.
-* Are the order of keys important? If so, use one of the tree databases.
+* Is the order of keys important? If so, use one of the tree databases.
 * Do you want LRU eviction with an upper-bound of memory usage? Use cache hash.
 * Are your values very large? Consider using the filesystem or the directory
   hash/tree database.
@@ -66,10 +64,10 @@ Persistent databases:
 Stash database
 ^^^^^^^^^^^^^^
 
-Stash database is stored in memory and is a little bit more efficient than the
-cache hash (``*``), however it handles eviction slightly differently. The cache
-hash retains metadata so that it is able to do LRU eviction, whereas the stash
-database evicts random records.
+Stash database is stored in memory and is a little bit more space-efficient
+than the cache hash (``*``), however it handles eviction slightly differently.
+The cache hash retains metadata so that it is able to do LRU eviction, whereas
+a stash database capped with ``ktcapsiz`` evicts random records.
 
 * ``bnum`` - default is ~1M, should be 80%-400% of total records
 
@@ -78,10 +76,9 @@ CacheHashDB
 
 Stored in-memory and supports LRU eviction, uses a doubly-linked hash map.
 
-* ``bnum``: default ~1M. Should be 50% - 400% of total records. Collision
-  chaining is binary search
-* ``opts``: useful to reduce memory at expense of time effciency. Use compression
-  if the key and value of each record is greater-than 1KB
+* ``bnum``: default ~1M. Should be 50% - 400% of total records. The collision
+  chain is a binary search tree.
+* ``opts``: useful to reduce memory at expense of time efficiency.
 * ``capcnt`` and/or ``capsiz``: keep memory usage constant by expiring old
   records.
 * supports compression, which is recommended when values are larger than 1KB.
@@ -89,8 +86,8 @@ Stored in-memory and supports LRU eviction, uses a doubly-linked hash map.
 CacheTreeDB
 ^^^^^^^^^^^
 
-Inherits all tuning options from the CacheHashDB, since each node of the btree
-is serialized as a page-buffer and treated as a record in the cache hash db.
+Inherits all tuning options from the CacheHashDB except ``capcnt`` and
+``capsiz``.
 
 * ``psiz``: default is 8192
 * ``pccap``: page-cache capacity, default is 64MB
@@ -113,38 +110,37 @@ On-disk hash table.
 * ``fpow``: Power of the capacity of the free block pool. Default=10, rarely
   needs to be modified.
 
-apow, fpow, opts and bnum *must* be specified before a DB is opened and
+apow, fpow, opts and bnum must be specified before a DB is opened and
 cannot be changed after the fact.
 
 TreeDB
 ^^^^^^
 
-Inherits tuning parameters from the HashDB, as the B-Tree is implemented on top
-of the file hash database. Supports the following additional tuning parameters:
+Inherits tuning parameters from the HashDB. Supports the following additional
+tuning parameters:
 
 * ``bnum``: default 64K. Bucket number should be calculated by the number of
   pages, such that the bucket number is 10% of the total record count.
 * ``pccap``: page-cache capacity, default is 64MB. If there is additional RAM,
-  this can be increased, but it is better to assign RAM using the internal
+  this can be increased. Otherwise it is better to assign RAM to the internal
   memory-mapped region using the ``msiz`` parameter.
 * ``psiz``: default is 8192, specified before opening db and cannot be changed.
 * ``rcomp``: record comparator, default is lexical
 
-Unlike the HashDB, the default alignment power (``apow``) is 256 (2^8), and the
-default bucket number is 64K.
+Unlike the HashDB, the default alignment power (``apow``) is 8 (256 bytes).
 
 Server configuration
 --------------------
 
-Complete list of available options for running `ktserver <http://alticelabs.github.io/kyoto/kyototycoon/doc/command.html#ktserver>`_.
+Complete list of available options for running `ktserver <https://alticelabspublic.github.io/kyoto/kyototycoon/doc/command.html#ktserver>`_.
 
-Note that the durability options may have a significant impact on performance:
+The durability options may have a significant impact on performance:
 
 * ``-oat`` - automatic transactions
 * ``-asi`` / ``-uasi`` - automatic synchronization of database and update logs
 * ``-ash`` - physical synchronization
 
-Also refer to the `"tips" document <https://fallabs.com/kyototycoon/spex.html#tips>`_,
+Also refer to the `"tips" document <https://dbmx.net/kyototycoon/spex.html#tips>`_,
 which covers things like binary logging, snapshots, replication, etc.
 
 Notes from alticelabs `readme <https://github.com/alticelabs/kyoto>`_:
@@ -157,15 +153,15 @@ Notes from alticelabs `readme <https://github.com/alticelabs/kyoto>`_:
   updates as well as reads). Enabling transactions and/or synchronization makes
   this worse, as does increasing the number of buckets for hash databases
   (larger structures to write). Having a disk controller with some kind of
-  battery-backed write-cache makes these issues mute.
+  battery-backed write-cache makes these issues moot.
 * Choose your on-disk database tuning options carefully and don't tune unless
   you need to. Some options can be modified by a simple restart of the server
   (e.g. ``pccap``, ``msiz``) but others require creating the database from
-  scratch (e.g.  ``bnum``, ``opts=c``).
+  scratch (e.g. ``bnum``, ``opts=c``).
 * Make sure you have enough disk space to store your on-disk databases as they
   grow. The server uses ``mmap()`` for file access and handles out-of-space
   conditions by terminating immediately. The database should still be
-  consistent if this happens, so don't fret too much about it.
+  consistent if this happens.
 * The unique server ID (``-sid``) is used to break replication loops (a server
   instance ignores keys with its own SID). Keep this in mind when restoring
   failed master-master instances. The documentation recommends always choosing
@@ -186,7 +182,7 @@ Standalone b-tree database with compression and binary logging enabled. The
                               '/data/kyoto/db/db.kct#opts=c#pccap=256m#dfunit=8'
 
 If you have a good idea of how many objects you are storing, you can use a
-persistent hash. The ``bnum=1m`` configures 1 million hash buckets (about 2x
+persistent hash. The ``bnum=1000000`` configures 1 million hash buckets (about 2x
 the number of expected keys), and ``msiz=256m`` sets the size of the
 memory-mapped region (larger is better, depending on availability of RAM).
 
