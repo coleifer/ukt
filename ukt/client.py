@@ -1412,6 +1412,32 @@ class KyotoTycoon(object):
         resp, status = self._request('/ulog_remove', data, None)
         return status == 200
 
+    def tune_replication(self, host=None, port=None, ts=None, iv=None):
+        """
+        Change the replication master of a running server.
+
+        :param str host: master host. If omitted, replication is disabled.
+        :param int port: master port, defaults to 1978.
+        :param ts: maximum timestamp of logs already read, as a datetime, or
+            'now'. If omitted, the current setting is kept.
+        :param float iv: interval of each replication operation in
+            milliseconds. If omitted, the current setting is kept.
+        :return: True on success.
+        """
+        data = {}
+        if host is not None:
+            data['host'] = host
+        if port is not None:
+            data['port'] = str(port)
+        if ts == 'now':
+            data['ts'] = ts
+        elif ts is not None:
+            data['ts'] = str(int(ts.timestamp() * 1e9))
+        if iv is not None:
+            data['iv'] = str(iv)
+        resp, status = self._request('/tune_replication', data, None)
+        return status == 200
+
     def count(self, db=None, **kw):
         """
         Return the number of keys in the given database.

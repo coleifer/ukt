@@ -502,6 +502,20 @@ Kyoto Tycoon client
         Removes update-log files older than the given datetime, except the
         current one.
 
+    .. py:method:: tune_replication(host=None, port=None, ts=None, iv=None)
+
+        :param str host: master host. If omitted, replication is disabled.
+        :param int port: master port, defaults to 1978.
+        :param ts: maximum timestamp of logs already read, as a ``datetime``,
+            or ``'now'``. If omitted, the current setting is kept.
+        :param float iv: interval of each replication operation in
+            milliseconds. If omitted, the current setting is kept.
+        :return: ``True`` on success.
+        :raises ProtocolError: on failure.
+
+        Change the replication master of a running server. The server must be
+        started with ``-rts``.
+
     .. py:method:: count(db=None)
 
         :param db: database index
