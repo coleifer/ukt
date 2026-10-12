@@ -740,6 +740,16 @@ function _normalize_index(array_len, idx)
 end
 
 
+-- Clamp a python-style slice bound to a 0-based offset in [0, array_len].
+function _slice_bound(array_len, idx)
+  local offset = tonumber(idx)
+  if offset < 0 then offset = array_len + offset end
+  if offset < 0 then return 0 end
+  if offset > array_len then return array_len end
+  return offset
+end
+
+
 -- Redis-like LRANGE -- zero-based.
 -- accepts: { key, start, stop }
 -- returns: { i1, i2, ... }
@@ -986,26 +996,13 @@ end
 -- returns: { length }
 function lremrange(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
+    -- Out-of-bounds indexes are clamped, like python slices. The loop
+    -- below uses 1-based indexes, so start is shifted and stop (exclusive)
+    -- is used as-is.
     local start = 1
     local stop = #arr
-    local ok
-
-    if inmap.start then
-      start, ok = _normalize_index(#arr, inmap.start)
-      if not ok then
-        kt.log("system", "invalid start index in lremrange()")
-        return nil, false
-      end
-    end
-    if inmap.stop then
-      -- Stop is exclusive, so it may equal the length of the list.
-      stop = tonumber(inmap.stop)
-      if stop < 0 then stop = #arr + stop end
-      if stop < 0 or stop > #arr then
-        kt.log("system", "invalid stop index in lremrange()")
-        return nil, false
-      end
-    end
+    if inmap.start then start = _slice_bound(#arr, inmap.start) + 1 end
+    if inmap.stop then stop = _slice_bound(#arr, inmap.stop) end
     local removed = false
     for i = stop, start, -1 do
       if arr[i] ~= nil then

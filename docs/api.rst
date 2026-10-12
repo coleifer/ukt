@@ -50,7 +50,7 @@ Kyoto Tycoon client
 
     Client for interacting with Kyoto Tycoon database.
 
-    .. py:method:: set_database(db)
+    .. py:method:: set_database(db=0)
 
         :param int db: database index.
 
@@ -269,6 +269,14 @@ Kyoto Tycoon client
         Execute a lua function and return the result with no post-processing or
         serialization.
 
+    .. py:attribute:: lua
+
+        Run lua functions as methods. ``client.lua.name(...)`` calls
+        :py:meth:`~KyotoTycoon.script` with ``name``. The method accepts an
+        optional ``dict`` of data, plus ``no_reply``, ``encode_values`` and
+        ``decode_values``. Other keyword arguments are added to the data,
+        overriding keys in the ``dict``.
+
     .. py:method:: report()
 
         :return: status fields and values
@@ -402,6 +410,10 @@ Kyoto Tycoon client
 
         Return whether or not the given key exists in the database.
 
+    .. py:method:: check(key, db=None)
+
+        Alias for :py:meth:`~KyotoTycoon.exists`.
+
     .. py:method:: length(key, db=None)
 
         :param str key: key.
@@ -480,9 +492,10 @@ Kyoto Tycoon client
               '14577366',
               datetime.datetime(2019, 1, 4, 1, 41, 7, 245000))]
 
-    .. py:method:: ulog_remove(max_dt)
+    .. py:method:: ulog_remove(max_dt=None)
 
-        :param datetime max_dt: maximum datetime of logs to remove
+        :param datetime max_dt: maximum datetime of logs to remove, defaults to
+            now.
         :return: ``True`` on success.
         :raises ProtocolError: on failure.
 
@@ -804,6 +817,12 @@ Kyoto Tycoon client
         :return: boolean indicating success.
 
         Close the cursor.
+
+    .. py:method:: __iter__()
+
+        Iterate over ``(key, value)`` tuples, starting at the current record
+        and moving in the direction of the last jump or step. A cursor that
+        has not been positioned jumps to the first record.
 
 
 .. py:class:: Queue(client, key, db=None)
@@ -1324,6 +1343,102 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
         ``arraydump`` format.
 
 
+.. py:class:: Set(kt, key, encode_values=True, decode_values=True, db=None)
+
+    :param KyotoTycoon kt: client
+    :param str key: key to store set data
+    :param bool encode_values: values should be serialized using the configured
+        serializer (e.g., KT_PICKLE, KT_MSGPACK, etc).
+    :param bool decode_values: values should be deserialized using the
+        configured serializer.
+    :param int db: database index to store set. If not specified, will use the
+        default db configured for the kt client.
+
+    .. py:method:: add(*values)
+
+        :param values: values to add.
+        :return: number of values added. Values already in the set are not
+            counted.
+
+    .. py:method:: add_bulk(values)
+
+        :param values: an iterable of values to add.
+        :return: number of values added.
+
+    .. py:method:: count()
+
+        :return: number of values in the set.
+
+    .. py:method:: contains(value)
+
+        :param value: value to check
+        :return: 1 if the value is in the set, 0 otherwise.
+
+    .. py:method:: members()
+
+        :return: a Python ``set`` of all values.
+
+    .. py:method:: pop()
+
+        :return: an arbitrary value, which is removed from the set, or
+            ``None`` if the set is empty.
+
+    .. py:method:: remove(*values)
+
+        :param values: values to remove.
+        :return: number of values removed.
+
+    .. py:method:: remove_bulk(values)
+
+        :param values: an iterable of values to remove.
+        :return: number of values removed.
+
+    .. py:method:: intersection(other, dest=None)
+
+        :param other: key (or :py:class:`Set` object) of the other set.
+        :param dest: key (or :py:class:`Set` object) to store the result in
+            (optional).
+        :return: a Python ``set`` of values in both sets.
+
+    .. py:method:: union(other, dest=None)
+
+        :param other: key (or :py:class:`Set` object) of the other set.
+        :param dest: key (or :py:class:`Set` object) to store the result in
+            (optional).
+        :return: a Python ``set`` of values in either set.
+
+    .. py:method:: difference(other, dest=None)
+
+        :param other: key (or :py:class:`Set` object) of the other set.
+        :param dest: key (or :py:class:`Set` object) to store the result in
+            (optional).
+        :return: a Python ``set`` of values in this set but not in ``other``.
+
+    .. py:method:: __len__()
+
+        See :py:meth:`~Set.count`.
+
+    .. py:method:: __contains__()
+
+        See :py:meth:`~Set.contains`.
+
+    .. py:method:: __delitem__()
+
+        See :py:meth:`~Set.remove`.
+
+    .. py:method:: __and__()
+
+        See :py:meth:`~Set.intersection`.
+
+    .. py:method:: __or__()
+
+        See :py:meth:`~Set.union`.
+
+    .. py:method:: __sub__()
+
+        See :py:meth:`~Set.difference`.
+
+
 Embedded Servers
 ----------------
 
@@ -1371,3 +1486,47 @@ Embedded Servers
     .. py:attribute:: client
 
         :py:class:`KyotoTycoon` client bound to the embedded server.
+
+
+Exceptions
+----------
+
+All exceptions can be imported from ``ukt``.
+
+.. py:exception:: KTError
+
+    Base class for all ukt exceptions. Also raised by
+    :py:class:`EmbeddedServer` when the server is not running or cannot be
+    started.
+
+.. py:exception:: ImproperlyConfigured
+
+    The client is misconfigured, e.g. an unrecognized serializer, or
+    ``KT_MSGPACK`` without the ``msgpack`` library.
+
+.. py:exception:: ProtocolError
+
+    The server returned an error response, e.g. an unexpected HTTP status or a
+    failed lua function.
+
+.. py:exception:: ServerError
+
+    The server returned an unexpected response on the binary protocol.
+
+.. py:exception:: ServerConnectionError
+
+    A binary protocol connection failed while reading or writing. Failures
+    while connecting, and on the HTTP API, raise the underlying socket error.
+
+.. py:exception:: ServerTimeoutError
+
+    Subclass of :py:exc:`ServerConnectionError`. A binary protocol socket
+    timed out. The socket is closed and removed from the connection pool.
+
+.. py:exception:: SignalTimeout
+
+    Timed out waiting for a signal.
+
+.. py:exception:: ReplicationError
+
+    Error in the replication client.

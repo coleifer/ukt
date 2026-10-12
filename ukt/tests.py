@@ -1843,6 +1843,12 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(l.get_range(0, 5), ['i1', 'i7'])
         self.assertEqual(l.get_range(2, 5), [])
 
+        # Out-of-bounds indexes are clamped.
+        self.assertEqual(l.remove_range(2), 2)
+        self.assertEqual(l.remove_range(10, 20), 2)
+        self.assertEqual(l.remove_range(-10, 1), 1)
+        self.assertEqual(l.remove_range(0, 10), 0)
+
         self.assertEqual(l.remove_range(), 0)
         self.assertEqual(l.get_range(), [])
 
@@ -1990,8 +1996,6 @@ class TestLuaContainers(BaseLuaTestCase):
 
         l.append('item-1')
 
-        _lua('lremrange', {'key': 'l1', 'start': '1'})  # Invalid start idx.
-        _lua('lremrange', {'key': 'l1', 'start': '0', 'stop': '2'})  # Stop.
         _lua('lset', {'key': 'l1', 'index': '2'})  # Missing value.
 
         self.assertEqual(list(l), ['item-1'])

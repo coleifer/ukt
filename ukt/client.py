@@ -331,11 +331,13 @@ class KyotoTycoon(object):
     :param int default_db: default database index.
     :param bool decode_keys: decode keys as utf8-encoded unicode.
     :param serializer: value serialization. Default is KT_BINARY, which treats
-        values as utf8-encoded unicode. To disable serialization use KT_NONE.
+        values as utf8-encoded unicode. To disable deserialization use KT_NONE.
         Other serializers: KT_JSON, KT_MSGPACK and KT_PICKLE.
     :param encode_value: custom serializer for encoding values as bytestrings.
-    :param decode_value: custom deserializer for decoding bytestrings.
-    :param int max_age: max idle time for socket in connection pool.
+        Takes precedence over serializer.
+    :param decode_value: custom deserializer for decoding bytestrings. Takes
+        precedence over serializer.
+    :param int max_age: max age of socket in connection pool.
     """
     _content_type = 'text/tab-separated-values; colenc=B'
     # Cursors are scoped to the server session (connection) that created them,
