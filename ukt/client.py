@@ -17,7 +17,6 @@ import heapq
 import io
 import itertools
 import json
-import random
 import re
 import socket
 import struct
@@ -339,10 +338,9 @@ class KyotoTycoon(object):
     :param int max_age: max idle time for socket in connection pool.
     """
     _content_type = 'text/tab-separated-values; colenc=B'
-    # Cursors are identified server-side by their id and are shared across
-    # all connections, so begin at a random offset to avoid collisions with
-    # other client processes talking to the same server.
-    _cursor_id = itertools.count(random.randrange(2 ** 32))
+    # Cursors are scoped to the server session (connection) that created them,
+    # so ids only need to be unique per connection.
+    _cursor_id = itertools.count()
 
     def __init__(self, host='127.0.0.1', port=1978, timeout=None, default_db=0,
                  decode_keys=True, serializer=None, encode_value=None,
@@ -411,7 +409,11 @@ class KyotoTycoon(object):
         return l
 
     @contextmanager
-    def ctx(self, http=False):
+    def ctx(self, http=False, conn=None):
+        if conn is not None:
+            # Caller owns the connection, e.g. a cursor bound to its session.
+            yield conn
+            return
         sock = self.pool.checkout(http)
         try:
             yield sock
@@ -804,7 +806,8 @@ class KyotoTycoon(object):
         return accum
 
     def _request(self, path, data, db=None, allowed_status=None, atomic=False,
-                 decode_keys=None, signal=None, wait=None, send=False):
+                 decode_keys=None, signal=None, wait=None, send=False,
+                 conn=None):
         if isinstance(data, dict):
             body = self._encode_keys_values(data)
         elif isinstance(data, list):
@@ -835,7 +838,7 @@ class KyotoTycoon(object):
             else:
                 body = db_data
 
-        with self.ctx(http=True) as conn:
+        with self.ctx(http=True, conn=conn) as conn:
             try:
                 conn.request('POST', self._prefix + path, body, self._headers)
                 response = conn.getresponse()
@@ -1211,7 +1214,7 @@ class KyotoTycoon(object):
         :param int db: database index.
         :return: True on success.
         """
-        # If step > 0, the whole region is scanned.
+        # If step is omitted (or <= 0), the whole region is scanned.
         data = {'step': str(step)} if step > 0 else {}
         resp, status = self._request('/vacuum', data, db, **kw)
         return status == 200
@@ -1448,35 +1451,29 @@ class KyotoTycoon(object):
     def __len__(self):
         return self.count()
 
-    def keys(self, db=None):
+    def _cursor_iter(self, db, read):
         cursor = self.cursor(db=db)
-        if not cursor.jump(): return
-        while True:
-            key = cursor.key()
-            if key is None: return
-            yield key
-            if not cursor.step(): return
+        try:
+            if not cursor.jump(): return
+            while True:
+                item = read(cursor)
+                if item is None: return
+                yield item
+                if not cursor.step(): return
+        finally:
+            cursor.close()
+
+    def keys(self, db=None):
+        return self._cursor_iter(db, Cursor.key)
 
     def keys_nonlazy(self, db=None):
         return self.match_prefix('', db=db)
 
     def values(self, db=None):
-        cursor = self.cursor(db=db)
-        if not cursor.jump(): return
-        while True:
-            value = cursor.value()
-            if value is None: return
-            yield value
-            if not cursor.step(): return
+        return self._cursor_iter(db, Cursor.value)
 
     def items(self, db=None):
-        cursor = self.cursor(db=db)
-        if not cursor.jump(): return
-        while True:
-            kv = cursor.get()
-            if kv is None: return
-            yield kv
-            if not cursor.step(): return
+        return self._cursor_iter(db, Cursor.get)
 
     def __iter__(self):
         return iter(self.keys())
@@ -1648,6 +1645,14 @@ class Cursor(object):
         self._encode_values = encode_values
         self._initialized = False
         self._valid = False
+        self._conn = None
+
+    def _cmd(self, fn, *args, **kw):
+        # The server keeps cursors per-session, so every command for this
+        # cursor goes over one dedicated connection rather than the pool.
+        if self._conn is None:
+            self._conn = self.protocol.pool.create_http_client()
+        return fn(self.cursor_id, *args, conn=self._conn, **kw)
 
     def __iter__(self):
         if not self._initialized and not self._valid:
@@ -1659,71 +1664,71 @@ class Cursor(object):
 
     def jump(self, key=None, **kw):
         self._initialized = True
-        self._valid = self.protocol.cur_jump(self.cursor_id, key, self.db,
-                                             **kw)
+        self._valid = self._cmd(self.protocol.cur_jump, key, self.db, **kw)
         return self._valid
 
     def jump_back(self, key=None, **kw):
         self._initialized = True
-        self._valid = self.protocol.cur_jump_back(self.cursor_id, key, self.db,
-                                                  **kw)
+        self._valid = self._cmd(self.protocol.cur_jump_back, key, self.db,
+                                **kw)
         return self._valid
 
     def step(self, **kw):
-        self._valid = self.protocol.cur_step(self.cursor_id, **kw)
+        self._valid = self._cmd(self.protocol.cur_step, **kw)
         return self._valid
 
     def step_back(self, **kw):
-        self._valid = self.protocol.cur_step_back(self.cursor_id, **kw)
+        self._valid = self._cmd(self.protocol.cur_step_back, **kw)
         return self._valid
 
     def key(self, step=False, **kw):
         if self._valid:
-            return self.protocol.cur_get_key(self.cursor_id, step, **kw)
+            return self._cmd(self.protocol.cur_get_key, step, **kw)
 
     def value(self, step=False, **kw):
         if self._valid:
-            return self.protocol.cur_get_value(self.cursor_id, step,
-                                               self._decode_values, **kw)
+            return self._cmd(self.protocol.cur_get_value, step,
+                             self._decode_values, **kw)
 
     def get(self, step=False, **kw):
         if self._valid:
-            return self.protocol.cur_get(self.cursor_id, step,
-                                         self._decode_values, **kw)
+            return self._cmd(self.protocol.cur_get, step, self._decode_values,
+                             **kw)
 
     def set_value(self, value, step=False, expire_time=None, **kw):
         if self._valid:
-            if not self.protocol.cur_set_value(self.cursor_id, value, step,
-                                               expire_time,
-                                               self._encode_values, **kw):
+            if not self._cmd(self.protocol.cur_set_value, value, step,
+                             expire_time, self._encode_values, **kw):
                 self._valid = False
         return self._valid
 
     def remove(self, **kw):
         if self._valid:
-            if not self.protocol.cur_remove(self.cursor_id, **kw):
+            if not self._cmd(self.protocol.cur_remove, **kw):
                 self._valid = False
         return self._valid
 
     def seize(self, **kw):
         if self._valid:
-            kv = self.protocol.cur_seize(self.cursor_id, self._decode_values,
-                                         **kw)
+            kv = self._cmd(self.protocol.cur_seize, self._decode_values, **kw)
             if kv is None:
                 self._valid = False
             return kv
 
     def close(self):
-        if self._valid and self.protocol.cur_delete(self.cursor_id):
-            self._valid = False
-            return True
-        return False
+        # Closing the connection also frees the cursor on the server.
+        deleted = self._valid and self._cmd(self.protocol.cur_delete)
+        self._valid = False
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+        return deleted
 
     def __next__(self):
         if not self._valid:
             raise StopIteration
-        kv = self.protocol.cur_get(self.cursor_id, step=True,
-                                   decode_value=self._decode_values)
+        kv = self._cmd(self.protocol.cur_get, step=True,
+                       decode_value=self._decode_values)
         if kv is None:
             self._valid = False
             raise StopIteration

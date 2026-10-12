@@ -509,6 +509,34 @@ class TestCursor(BaseTestCase):
         self.assertTrue(c.remove())
         self.assertEqual(list(c), [('k2', 'v2-b'), ('k3', 'v3')])
 
+    def test_cursor_fresh_connections(self):
+        # The server keeps cursors per-connection. With a tiny max_age, every
+        # pooled request gets a new connection, so a cursor must not depend
+        # on the pool handing back the same one.
+        db = KyotoTycoon(self._server.host, self._server.port, max_age=1e-9)
+        self.assertEqual(list(db.keys()), ['k1', 'k2', 'k3', 'k4'])
+        self.assertEqual(list(db.values()), ['v1', 'v2', 'v3', 'v4'])
+
+        c = db.cursor()
+        self.assertTrue(c.jump('k2'))
+        self.assertEqual(c.get(), ('k2', 'v2'))
+        self.assertTrue(c.step())
+        self.assertEqual(list(c), [('k3', 'v3'), ('k4', 'v4')])
+        db.close_all()
+
+    def test_cursor_close(self):
+        c = self.db.cursor()
+        self.assertTrue(c.jump())
+        with self.db.ctx(http=True):  # Occupy the pooled HTTP connection.
+            self.assertEqual(c.key(), 'k1')
+        self.assertTrue(c.close())
+        self.assertFalse(c.close())
+        self.assertTrue(c.key() is None)
+
+        # A closed cursor can be repositioned.
+        self.assertTrue(c.jump('k3'))
+        self.assertEqual(list(c), [('k3', 'v3'), ('k4', 'v4')])
+
 
 class TestSerializers(BaseTestCase):
     server_kwargs = {'database': '*'}
@@ -2544,6 +2572,15 @@ class TestSignalQueue(BaseTestCase):
         self.assertEqual(self.db.get('szz'), 'other')
 
         self.assertEqual(sq.flush(), 0)
+
+    def test_signal_queue_fresh_connections(self):
+        # See TestCursor.test_cursor_fresh_connections.
+        db = KyotoTycoon(self._server.host, self._server.port, max_age=1e-9)
+        sq = db.SignalQueue('sq')
+        ok, _ = sq.produce('item1')
+        self.assertTrue(ok)
+        self.assertEqual(sq.consume(wait=1), 'item1')
+        db.close_all()
 
 
 class TestMultipleThreads(BaseTestCase):

@@ -724,6 +724,8 @@ Kyoto Tycoon client
         writing to the cursor.
 
     Create a helper for working with the database using the cursor interface.
+    Each cursor uses its own connection to the server until
+    :py:meth:`~Cursor.close` is called.
 
     .. py:method:: jump(key=None)
 

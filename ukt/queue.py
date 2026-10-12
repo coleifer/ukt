@@ -153,26 +153,32 @@ class SignalQueue(object):
         wait = self.wait if wait is None else wait
         prefix = self.key + ':'
 
-        # Jump to the first queue item. The cursor may land on an unrelated
-        # key that happens to sort after the queue prefix, in which case no
-        # items exist and we wait on the signal and re-try.
-        use_signal = False
-        while True:
-            try:
-                if use_signal:
-                    ok = self.client.cur_jump(self.cursor_id, prefix, self.db,
-                                              signal=self.signal, wait=wait)
-                else:
-                    ok = self.client.cur_jump(self.cursor_id, prefix, self.db)
-            except SignalTimeout:
-                return
-            use_signal = True
-            if ok:
-                key = self.client.cur_get_key(self.cursor_id)
-                if key is not None and self._match(key, prefix):
-                    break
+        # The server keeps cursors per-session, so hold one connection for
+        # every cursor command in this call.
+        with self.client.ctx(http=True) as conn:
+            # Jump to the first queue item. The cursor may land on an
+            # unrelated key that happens to sort after the queue prefix, in
+            # which case no items exist and we wait on the signal and re-try.
+            use_signal = False
+            while True:
+                try:
+                    if use_signal:
+                        ok = self.client.cur_jump(
+                            self.cursor_id, prefix, self.db,
+                            signal=self.signal, wait=wait, conn=conn)
+                    else:
+                        ok = self.client.cur_jump(self.cursor_id, prefix,
+                                                  self.db, conn=conn)
+                except SignalTimeout:
+                    return
+                use_signal = True
+                if ok:
+                    key = self.client.cur_get_key(self.cursor_id, conn=conn)
+                    if key is not None and self._match(key, prefix):
+                        break
 
-        resp = self.client.cur_seize(self.cursor_id, decode_value=False)
+            resp = self.client.cur_seize(self.cursor_id, decode_value=False,
+                                         conn=conn)
         if resp is None:
             return
         key, value = resp
