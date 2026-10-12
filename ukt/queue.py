@@ -175,8 +175,8 @@ class SignalQueue(object):
                 if ok:
                     key = self.client.cur_get_key(self.cursor_id, conn=conn)
                     if key is not None and self._match(key, prefix):
-                        # Seize by key. If another consumer took the item
-                        # first, cur_seize would take the record after it.
+                        # Seize this exact key. If another consumer got it
+                        # first, this returns None.
                         return self.client.seize(key, self.db, conn=conn)
 
     def flush(self):

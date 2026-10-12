@@ -1322,54 +1322,31 @@ function queue_transfer(inmap, outmap)
       return kt.RVELOGIC
     end
 
+    -- Claim one item at a time, so a failed add has one item to put back.
     local n = tonumber(inmap.n) or 1
     local num = 0
-    local key = string.format("%s\t", queue)
-    local score_start = string.len(queue) + 2  -- First byte after "\t".
-    local score_end = score_start + 11  -- read 12 bytes.
-
-    -- Start processing at the head of the source queue.
-    local cursor = db:cursor()
-
-    -- No data, we're done.
-    if not cursor:jump(key) then
-      cursor:disable()
-      return kt.RVSUCCESS
+    local k, v, score
+    local claim = function(item_k, item_v, _, item_score)
+      k, v, score = item_k, item_v, item_score
+      return true, true
     end
 
-    local k, v, xt, incr
-
-    while n ~= 0 do
-      -- Retrieve the key, value and xt from the cursor. If the cursor is
-      -- invalidated then nil is returned.
-      k, v, xt = cursor:get()
-      if not k then break end
-
-      -- If this is not a queue item key, we are done.
-      if not _starts_with(k, key) then break end
+    while n ~= 0 and _queue_iter(db, queue, 1, claim) == 1 do
+      -- Add the item to the dest queue, preserving its score.
+      local dest_id = db:increment_double(dest, 1)
+      local dest_key = string.format("%s\t%012d%012d", dest,
+                                     QUEUE_SPLIT - score, dest_id)
+      if not db:add(dest_key, v) then
+        kt.log("info", "could not add key, already exists")
+        db:set(k, v)
+        return kt.RVELOGIC
+      end
 
       -- Add item to the outmap, returning value to user.
       o[tostring(num)] = v
-
-      -- Generate dest key, preserving the score of source key.
-      local dest_id = db:increment_double(dest, 1)
-      local score = tonumber(string.sub(k, score_start, score_end))
-      local dest_key = string.format("%s\t%012d%012d", dest, score, dest_id)
-
-      -- Add the item to the dest queue and remove from the source queue.
-      if not db:add(dest_key, v) then
-        kt.log("info", "could not add key, already exists")
-        cursor:disable()
-        return kt.RVELOGIC
-      else
-        cursor:remove()
-      end
-
       num = num + 1
       n = n - 1
     end
-
-    cursor:disable()
     return kt.RVSUCCESS
   end
   return _qfn(inmap, outmap, {"queue", "dest"}, fn)
@@ -1426,45 +1403,39 @@ function queue_madd(inmap, outmap)
 end
 
 
-function _queue_iter(db, queue, n, callback)
-  -- Perform a forward iteration through the queue (up to "n" items). The
-  -- user-defined callback returns a 2-tuple of (ok, incr) to signal that we
-  -- should continue looping, and to increment the counter, respectively.
-  local num = 0
+-- Visit up to n records whose keys start with prefix, in key order or in
+-- reverse. fn(key, value, num) runs inside the record lock, so it must not
+-- call db methods. It returns (remove, count). The record is removed under
+-- the same lock fn ran in, so concurrent consumers never get the same record.
+-- count advances num towards n, and returning nil stops. Returns num.
+function _prefix_iter(db, prefix, n, fn, reverse)
   local cursor = db:cursor()
-  local key = string.format("%s\t", queue)
-
-  local score_start = string.len(queue) + 2  -- First byte after "\t".
-  local score_end = score_start + 11  -- read 12 bytes.
-
-  -- No data, we're done.
-  if not cursor:jump(key) then
-    cursor:disable()
-    return num
+  local ok
+  if reverse then
+    ok = cursor:jump_back(prefix .. "\255")
+  else
+    ok = cursor:jump(prefix)
   end
 
-  local k, v, xt, ok, incr
+  local num = 0
+  local remove, count
+  local visit = function(k, v)
+    remove, count = nil, false
+    if _starts_with(k, prefix) then remove, count = fn(k, v, num) end
+    if remove then return kt.Visitor.REMOVE end
+    return kt.Visitor.NOP
+  end
 
-  while n ~= 0 do
-    -- Retrieve the key, value and xt from the cursor. If the cursor is
-    -- invalidated then nil is returned.
-    k, v, xt = cursor:get(false)
-    if not k then break end
-
-    -- If this is not a queue item key, we are done.
-    if not _starts_with(k, key) then break end
-
-    -- Extract the score of the item.
-    local score = tonumber(string.sub(k, score_start, score_end))
-
-    -- Pass control to the user-defined function, which is responsible for
-    -- stepping the cursor.
-    ok, incr = callback(cursor, k, v, num, QUEUE_SPLIT - score)
-    if not ok then break end
-
-    if incr then
+  while ok and n ~= 0 do
+    -- If another client removed the record under the cursor, accept visits
+    -- the next one instead. A removal moves the cursor along by itself.
+    if not cursor:accept(visit, true, false) or remove == nil then break end
+    if count then
       num = num + 1
       n = n - 1
+    end
+    if not remove then
+      if reverse then ok = cursor:step_back() else ok = cursor:step() end
     end
   end
 
@@ -1473,104 +1444,58 @@ function _queue_iter(db, queue, n, callback)
 end
 
 
-function _queue_iter_reverse(db, queue, n, callback)
-  -- Perform a backward iteration through the queue (up to "n" items). The
-  -- user-defined callback returns a 2-tuple of (ok, incr) to signal that we
-  -- should continue looping, and to increment the counter, respectively.
-  local num = 0
-  local cursor = db:cursor()
-  local max_key = string.format("%s\t\255", queue)
-  local prefix = string.format("%s\t", queue)
-
+-- Visit up to n items of a queue with _prefix_iter. Keys store
+-- QUEUE_SPLIT - score, so higher scores sort first. fn(key, value, num, score)
+-- receives the item's score.
+function _queue_iter(db, queue, n, fn, reverse)
   local score_start = string.len(queue) + 2  -- First byte after "\t".
   local score_end = score_start + 11  -- read 12 bytes.
-
-  -- No data, we're done.
-  if not cursor:jump_back(max_key) then
-    cursor:disable()
-    return num
-  end
-
-  local k, v, xt, ok, incr
-
-  while n ~= 0 do
-    -- Retrieve the key, value and xt from the cursor. If the cursor is
-    -- invalidated then nil is returned.
-    k, v, xt = cursor:get(false)
-    if not k then break end
-
-    -- If this is a queue item key, we remove the value (which implicitly steps
-    -- to the next key).
-    if not _starts_with(k, prefix) then break end
-
-    -- Extract the score of the item.
+  local item_fn = function(k, v, num)
     local score = tonumber(string.sub(k, score_start, score_end))
-
-    ok, incr = callback(cursor, k, v, num, QUEUE_SPLIT - score)
-    if not ok then break end
-
-    if incr then
-      num = num + 1
-      n = n - 1
-    end
+    return fn(k, v, num, QUEUE_SPLIT - score)
   end
-
-  cursor:disable()
-  return num
+  return _prefix_iter(db, queue .. "\t", n, item_fn, reverse)
 end
 
 
--- Remove items from a queue based on value (up-to "n" items).
+-- _queue_iter callback that adds items to o, skipping items below min_score.
+-- Items are removed when pop is true.
+function _queue_collect(o, min_score, pop)
+  return function(k, v, num, score)
+    if min_score ~= nil and score < min_score then return false, false end
+    o[tostring(num)] = v
+    return pop, true
+  end
+end
+
+
+-- Remove items from a queue based on value (up-to "n" items), from the head
+-- or from the tail.
 -- accepts: { queue, data, db, n, min_score }
 -- returns { num }
+function _queue_remove(inmap, outmap, reverse)
+  local cb = function(db, i, o)
+    local data = i.data
+    local n = tonumber(i.n or -1)
+    local min_score = tonumber(i.min_score)
+    local iter_cb = function(k, v, num, score)
+      local match = v == data and (min_score == nil or score >= min_score)
+      return match, match
+    end
+    outmap.num = _queue_iter(db, i.queue, n, iter_cb, reverse)
+    return kt.RVSUCCESS
+  end
+  return _qfn(inmap, outmap, {"queue", "data"}, cb)
+end
+
+
 function queue_remove(inmap, outmap)
-  local cb = function(db, i, o)
-    local queue = i.queue
-    local data = i.data
-    local n = tonumber(i.n or -1)
-    local min_score = tonumber(i.min_score)
-    local iter_cb = function(cursor, k, v, num, score)
-      if min_score ~= nil and score < min_score then
-        return cursor:step(), false
-      end
-
-      if data == v then
-        return cursor:remove(), true
-      else
-        return cursor:step(), false
-      end
-    end
-    outmap.num = _queue_iter(db, queue, n, iter_cb)
-    return kt.RVSUCCESS
-  end
-  return _qfn(inmap, outmap, {"queue", "data"}, cb)
+  return _queue_remove(inmap, outmap, false)
 end
 
 
--- Remove items from the back of a queue, based on value (up-to "n" items).
--- accepts: { queue, data, db, n, min_score }
--- returns { num }
 function queue_rremove(inmap, outmap)
-  local cb = function(db, i, o)
-    local queue = i.queue
-    local data = i.data
-    local n = tonumber(i.n or -1)
-    local min_score = tonumber(i.min_score)
-    local iter_cb = function(cursor, k, v, num, score)
-      if min_score ~= nil and score < min_score then
-        return cursor:step_back(), false
-      end
-
-      if data == v then
-        return cursor:remove(), true
-      else
-        return cursor:step_back(), false
-      end
-    end
-    outmap.num = _queue_iter_reverse(db, queue, n, iter_cb)
-    return kt.RVSUCCESS
-  end
-  return _qfn(inmap, outmap, {"queue", "data"}, cb)
+  return _queue_remove(inmap, outmap, true)
 end
 
 
@@ -1587,22 +1512,19 @@ function queue_set_score(inmap, outmap)
     local id_start = string.len(queue) + 2 + 12
     local id_end = id_start + 11  -- read 12 bytes.
     local accum = {}
-    local remove = {}
 
-    local iter_cb = function(cursor, k, v, num, score)
-      if data == v and score ~= new_score then
+    -- Remove each match as it is visited, then re-add the removed items
+    -- under the new score.
+    local iter_cb = function(k, v, num, score)
+      local match = v == data and score ~= new_score
+      if match then
         local item_id = string.sub(k, id_start, id_end)
         accum[string.format("%s\t%012d%012d", queue, new_score_k, item_id)] = v
-        table.insert(remove, k)
-        return cursor:step(), true
-      else
-        return cursor:step(), false
       end
+      return match, match
     end
-    _queue_iter(db, queue, n, iter_cb)
-    outmap.num = #remove
+    outmap.num = _queue_iter(db, queue, n, iter_cb)
     if outmap.num > 0 then
-      db:remove_bulk(remove)
       db:set_bulk(accum)
     end
     return kt.RVSUCCESS
@@ -1611,45 +1533,37 @@ function queue_set_score(inmap, outmap)
 end
 
 
--- pop/dequeue data from queue
+-- read up to n items from the head of a queue, or from the tail when reverse
+-- is true. Items are removed when pop is true.
 -- accepts: { queue, n, db, min_score }
 -- returns { idx: data, ... }
-function queue_pop(inmap, outmap)
+function _queue_read(inmap, outmap, reverse, pop)
   local cb = function(db, i, o)
     local n = tonumber(i.n or 1)
-    local min_score = tonumber(i.min_score)
-    local iter_cb = function(cursor, key, value, num, score)
-      if min_score ~= nil and score < min_score then
-        return cursor:step(), false
-      end
-
-      o[tostring(num)] = value
-      return cursor:remove(), true
-    end
-    _queue_iter(db, i.queue, n, iter_cb)
+    local iter_cb = _queue_collect(o, tonumber(i.min_score), pop)
+    _queue_iter(db, i.queue, n, iter_cb, reverse)
   end
   return _qfn(inmap, outmap, {"queue"}, cb)
 end
 
 
--- pop/dequeue data from end of queue
--- accepts: { queue, n, db, min_score }
--- returns { idx: data, ... }
-function queue_rpop(inmap, outmap)
-  local cb = function(db, i, o)
-    local n = tonumber(i.n or 1)
-    local min_score = tonumber(i.min_score)
-    local iter_cb = function(cursor, key, value, num, score)
-      if min_score ~= nil and score < min_score then
-        return cursor:step_back(), false
-      end
+function queue_pop(inmap, outmap)
+  return _queue_read(inmap, outmap, false, true)
+end
 
-      o[tostring(num)] = value
-      return cursor:remove(), true
-    end
-    _queue_iter_reverse(db, i.queue, n, iter_cb)
-  end
-  return _qfn(inmap, outmap, {"queue"}, cb)
+
+function queue_rpop(inmap, outmap)
+  return _queue_read(inmap, outmap, true, true)
+end
+
+
+function queue_peek(inmap, outmap)
+  return _queue_read(inmap, outmap, false, false)
+end
+
+
+function queue_rpeek(inmap, outmap)
+  return _queue_read(inmap, outmap, true, false)
 end
 
 
@@ -1665,14 +1579,7 @@ function queue_bpop(inmap, outmap)
   local min_score = tonumber(inmap.min_score)
 
   local cb = function(db, i, o)
-    local iter_cb = function(cursor, key, value, num, score)
-      if min_score ~= nil and score < min_score then
-        return cursor:step(), false
-      end
-
-      o[tostring(num)] = value
-      return cursor:remove(), true
-    end
+    local iter_cb = _queue_collect(o, min_score, true)
     local t = 0.1
     while _queue_iter(db, i.queue, 1, iter_cb) == 0 do
       if cutoff and kt.time() >= cutoff then break end
@@ -1680,48 +1587,6 @@ function queue_bpop(inmap, outmap)
       t = t * 1.15
       if t > 1 then t = 1 end
     end
-  end
-  return _qfn(inmap, outmap, {"queue"}, cb)
-end
-
-
--- peek data from queue
--- accepts: { queue, n, db, min_score }
--- returns { idx: data, ... }
-function queue_peek(inmap, outmap)
-  local cb = function(db, i, o)
-    local n = tonumber(i.n or 1)
-    local min_score = tonumber(i.min_score)
-    local iter_cb = function(cursor, key, value, num, score)
-      if min_score ~= nil and score < min_score then
-        return cursor:step(), false
-      end
-
-      o[tostring(num)] = value
-      return cursor:step(), true
-    end
-    _queue_iter(db, i.queue, n, iter_cb)
-  end
-  return _qfn(inmap, outmap, {"queue"}, cb)
-end
-
-
--- peek data from end of queue
--- accepts: { queue, n, db, min_score }
--- returns { idx: data, ... }
-function queue_rpeek(inmap, outmap)
-  local cb = function(db, i, o)
-    local n = tonumber(i.n or 1)
-    local min_score = tonumber(i.min_score)
-    local iter_cb = function(cursor, key, value, num, score)
-      if min_score ~= nil and score < min_score then
-        return cursor:step_back(), false
-      end
-
-      o[tostring(num)] = value
-      return cursor:step_back(), true
-    end
-    _queue_iter_reverse(db, i.queue, n, iter_cb)
   end
   return _qfn(inmap, outmap, {"queue"}, cb)
 end
@@ -2118,42 +1983,17 @@ function schedule_read(inmap, outmap)
   local key = inmap.key
   local max_score = tonumber(inmap.score) or 0xffffffff
   local n = tonumber(inmap.n or '-1')
-
-  local cursor = db:cursor()
-  local start_key = string.format("%s\t", key)
-
-  if not cursor:jump(start_key) then
-    -- No data, we're done.
-    cursor:disable()
-    return kt.RVSUCCESS
-  end
-
-  local k, v, xt
-  local num = 0
   local score_start = string.len(key) + 2  -- e.g. length + tab + 1.
   local score_end = score_start + 11  -- read 12 bytes.
 
-  while n ~= 0 do
-    -- Retrieve the key, value and xt from the cursor. If the cursor is
-    -- invalidated then nil is returned.
-    k, v, xt = cursor:get(false)
-    if not k then break end
-
-    -- If this is not a queue item key, we are done.
-    if not _starts_with(k, start_key) then break end
-
-    -- Extract the score from the key. If it is higher than the score provided
-    -- by the caller, we are done.
-    -- local score = kt.unpack("M", string.sub(k, score_start, score_end))[1]
+  -- Items sort by score, so stop at the first one past max_score.
+  local fn = function(k, v, num)
     local score = tonumber(string.sub(k, score_start, score_end))
-    if score > max_score then break end
-
-    cursor:remove()  -- Implies step to the next record.
+    if score > max_score then return nil end
     outmap[num] = v
-    num = num + 1
-    n = n - 1
+    return true, true
   end
-  cursor:disable()
+  _prefix_iter(db, key .. "\t", n, fn)
   return kt.RVSUCCESS
 end
 

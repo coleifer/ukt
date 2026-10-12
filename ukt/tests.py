@@ -69,6 +69,11 @@ class BaseTestCase(unittest.TestCase):
         return KyotoTycoon(self._server.host, self._server.port,
                            serializer=serializer)
 
+    def run_threads(self, fn, n=8):
+        threads = [threading.Thread(target=fn) for _ in range(n)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+
 
 class KyotoTycoonTests(object):
     def test_basic_operations(self):
@@ -546,8 +551,7 @@ class TestCursor(BaseTestCase):
         self.assertTrue(c.jump())
         c._conn.sock.shutdown(socket.SHUT_RDWR)
 
-        # The cursor is invalid until the next jump, rather than quietly
-        # reconnecting to a fresh session.
+        # The cursor is invalid until the next jump.
         self.assertRaises(socket.error, c.step)
         self.assertFalse(c.is_valid())
         self.assertFalse(c.step())
@@ -2334,6 +2338,25 @@ class TestLuaQueue(BaseLuaTestCase):
         self.assertEqual(qa.bpop(), 'item')
         self.assertTrue(qa.bpop(timeout=0.1) is None)
 
+    def test_queue_concurrent_consumers(self):
+        # Racing consumers get every item exactly once.
+        expected = ['%04d' % i for i in range(1000)]
+        takes = (lambda q: q.pop(n=5),
+                 lambda q: q.rpop(n=5),
+                 lambda q: q.transfer('qd', n=5))
+        for take in takes:
+            self.db.Queue('q').extend(expected)
+            out = []
+            def consume():
+                db = KyotoTycoon(self._server.host, self._server.port)
+                q = db.Queue('q')
+                while len(q):
+                    out.extend(take(q))
+                db.close_all()
+            self.run_threads(consume)
+            self.assertEqual(sorted(out), expected)
+        self.assertEqual(sorted(self.db.Queue('qd').peek(n=2000)), expected)
+
     def test_queue_score_sorting(self):
         # See also TestLuaScheduler.test_lua_schedule.
         q = self.db.Queue('q')
@@ -2551,6 +2574,22 @@ class TestLuaSchedule(BaseTestCase):
         self.assertEqual(len(s), 2)
         self.assertEqual(s.read(), ['i1', 'i2'])
 
+    def test_schedule_concurrent_readers(self):
+        # See TestLuaQueue.test_queue_concurrent_consumers.
+        expected = ['%04d' % i for i in range(1000)]
+        s = self.db.Schedule('s')
+        for i, item in enumerate(expected):
+            s.add(item, i % 7)
+        out = []
+        def read():
+            db = self.get_client(KT_PICKLE)
+            s = db.Schedule('s')
+            while len(s):
+                out.extend(s.read(n=5))
+            db.close_all()
+        self.run_threads(read)
+        self.assertEqual(sorted(out), expected)
+
     def test_schedule_clear_precise(self):
         s1 = self.db.Schedule('s1')
         s2 = self.db.Schedule('s1x')  # Shares "s1" as a prefix.
@@ -2630,8 +2669,9 @@ class TestSignalQueue(BaseTestCase):
         db.close_all()
 
     def test_signal_queue_lost_race(self):
-        # Another consumer takes the item after this one reads its key. The
-        # record that sorts after it must be left alone.
+        # Another consumer takes the item after this one reads its key.
+        # consume() returns None, and the record after the item keeps its
+        # value and expire time.
         db = KyotoTycoon(self._server.host, self._server.port)
         sq = db.SignalQueue('sq')
         ok, _ = sq.produce('item1')
@@ -2875,6 +2915,15 @@ class TestArrayMapSerialization(unittest.TestCase):
 
         self.assertEqual(serialize([]), b'')
         self.assertEqual(deserialize(b''), [])
+
+    def test_corrupt_sizes(self):
+        # Sizes larger than the data are rejected, including ones near 2**64.
+        huge = b'\x81' + b'\xff' * 8 + b'\x7f'
+        for data in (huge + b'x' * 16, b'\x05abc'):
+            self.assertRaises(ValueError, self.db.deserialize_list, data)
+        for data in (huge + b'\x00' + b'x' * 16, b'\x00' + huge + b'x' * 16,
+                     b'\x05\x05abcde'):
+            self.assertRaises(ValueError, self.db.deserialize_dict, data)
 
 
 class TestConnectionError(unittest.TestCase):

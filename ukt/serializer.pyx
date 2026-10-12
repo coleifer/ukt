@@ -111,8 +111,7 @@ def _deserialize_dict(raw_data, deserialize=True):
         buf += vstep
         buflen -= vstep
 
-        # Compare each size against the bytes left. Adding them to the step
-        # instead could overflow and pass a corrupt size.
+        # Compare each size against the bytes left, which cannot overflow.
         if knum > <uint64_t>buflen:
             raise ValueError('corrupt key, refusing to process')
         bkey = buf[:knum]

@@ -1689,8 +1689,8 @@ class Cursor(object):
         try:
             return fn(self.cursor_id, *args, conn=self._conn, **kw)
         except (socket.error, HTTPException):
-            # The cursor was lost with its session. Invalidate it, so the
-            # next command does not quietly reconnect to a fresh session.
+            # The session, and the cursor with it, died with the connection.
+            # Invalidate the cursor so only a jump opens a new session.
             self.close()
             raise
 
