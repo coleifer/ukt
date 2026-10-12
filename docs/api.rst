@@ -43,7 +43,9 @@ Kyoto Tycoon client
         unicode. ``KT_NONE`` disables deserialization, or use one of
         ``KT_JSON``, ``KT_MSGPACK`` or ``KT_PICKLE``.
     :param encode_value: custom serializer for encoding values as bytestrings.
-    :param decode_value: custom deserializer for decoding bytestrings.
+        Takes precedence over ``serializer``.
+    :param decode_value: custom deserializer for decoding bytestrings. Takes
+        precedence over ``serializer``.
     :param int max_age: max age of socket in connection pool.
 
     Client for interacting with Kyoto Tycoon database.
@@ -296,7 +298,8 @@ Kyoto Tycoon client
     .. py:method:: clear(db=None)
 
         :param int db: database index
-        :return: boolean indicating success
+        :return: ``True`` on success.
+        :raises ProtocolError: on failure.
 
         Remove all keys from the database.
 
@@ -305,7 +308,8 @@ Kyoto Tycoon client
         :param bool hard: perform a "hard" synchronization.
         :param str command: command to execute after synchronization.
         :param int db: database index.
-        :return: boolean indicating success.
+        :return: ``True`` on success.
+        :raises ProtocolError: on failure.
 
         Synchronize the database, optionally executing the given command upon
         success. This can be used to create hot backups, for example.
@@ -422,7 +426,8 @@ Kyoto Tycoon client
 
         :param int step: number of steps, default is 0
         :param int db: database index
-        :return: boolean indicating success
+        :return: ``True`` on success.
+        :raises ProtocolError: on failure.
 
         Vacuum the database.
 
@@ -478,7 +483,8 @@ Kyoto Tycoon client
     .. py:method:: ulog_remove(max_dt)
 
         :param datetime max_dt: maximum datetime of logs to remove
-        :return: boolean indicating success
+        :return: ``True`` on success.
+        :raises ProtocolError: on failure.
 
         Removes update-log files older than the given datetime, except the
         current one.
@@ -1161,8 +1167,7 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
         :param int stop: stop index. Supports negative values.
         :return: a list of items corresponding to the given range.
 
-        Slicing operation equivalent to Python's list slice behavior. If the
-        start index is out-of-bounds, the return value will be an empty list.
+        Slicing operation equivalent to Python's list slice behavior.
 
     .. py:method:: index(index)
 
@@ -1242,7 +1247,7 @@ serializer (``KT_PICKLE``, ``KT_MSGPACK``, etc).
 
     .. py:method:: set(index, value)
 
-        :param int index: index to set.
+        :param int index: index to set. Supports negative values.
         :param value: value to set at given index
 
         Set the value at the given index. If the index is out-of-bounds, an

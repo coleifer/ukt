@@ -300,7 +300,7 @@ class ScriptRunner(object):
             if __data is None:
                 __data = kwargs
             elif kwargs:
-                __data.update(kwargs)
+                __data = dict(__data, **kwargs)
             return self.client.script(attr_name, __data, no_reply,
                                       encode_values, decode_values)
         return run_script
@@ -351,8 +351,8 @@ class KyotoTycoon(object):
         self.default_db = default_db
         self.decode_keys = decode_keys
         if serializer is None or serializer == KT_BINARY:
-            self.encode_value = encode_value or encode
-            self.decode_value = decode_value or decode
+            self.encode_value = encode
+            self.decode_value = decode
         elif serializer == KT_MSGPACK:
             if msgpack is None:
                 raise ImproperlyConfigured('msgpack library not found')
@@ -372,6 +372,10 @@ class KyotoTycoon(object):
             self.decode_value = pickle.loads
         else:
             raise ImproperlyConfigured('unrecognized serializer')
+
+        # Custom codecs take precedence over the serializer's.
+        self.encode_value = encode_value or self.encode_value
+        self.decode_value = decode_value or self.decode_value
 
         self._prefix = '/rpc'
         self._headers = {'Content-Type': self._content_type}
@@ -1440,8 +1444,8 @@ class KyotoTycoon(object):
     def update(self, __data=None, **kwargs):
         if __data is None:
             __data = kwargs
-        else:
-            __data.update(kwargs)
+        elif kwargs:
+            __data = dict(__data, **kwargs)
         return self.set_bulk(__data)
     pop = seize
 
