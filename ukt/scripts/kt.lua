@@ -750,28 +750,20 @@ function _slice_bound(array_len, idx)
 end
 
 
+-- Convert python-style slice bounds [start, stop) to a 1-based inclusive
+-- range. An empty slice gives start > stop.
+function _slice_range(array_len, start, stop)
+  return _slice_bound(array_len, start or 0) + 1,
+         _slice_bound(array_len, stop or array_len)
+end
+
+
 -- Redis-like LRANGE -- zero-based.
 -- accepts: { key, start, stop }
 -- returns: { i1, i2, ... }
 function lrange(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
-    local arrsize = #arr
-    local start = tonumber(inmap.start or "0") + 1
-    if start < 1 then
-      start = arrsize + start
-      if start < 1 then start = 1 end
-    end
-
-    local stop = inmap.stop
-    if stop then
-      stop = tonumber(stop)
-      if stop < 0 then
-        stop = arrsize + stop
-      end
-    else
-      stop = arrsize
-    end
-
+    local start, stop = _slice_range(#arr, inmap.start, inmap.stop)
     local n = 0
     for i = start, stop, 1 do
       outmap[tostring(n)] = arr[i]
@@ -996,13 +988,7 @@ end
 -- returns: { length }
 function lremrange(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
-    -- Out-of-bounds indexes are clamped, like python slices. The loop
-    -- below uses 1-based indexes, so start is shifted and stop (exclusive)
-    -- is used as-is.
-    local start = 1
-    local stop = #arr
-    if inmap.start then start = _slice_bound(#arr, inmap.start) + 1 end
-    if inmap.stop then stop = _slice_bound(#arr, inmap.stop) end
+    local start, stop = _slice_range(#arr, inmap.start, inmap.stop)
     local removed = false
     for i = stop, start, -1 do
       if arr[i] ~= nil then
@@ -1102,24 +1088,7 @@ function lunpack(inmap, outmap)
   local fn = function(key, arr, inmap, outmap)
     local prefix = inmap.prefix or (key .. ":")
     local format = inmap.format or "%04d"
-    local arrsize = #arr
-    local start = tonumber(inmap.start or "0") + 1
-
-    if start < 1 then
-      start = arrsize + start
-      if start < 1 then start = 1 end
-    end
-
-    local stop = inmap.stop
-    if stop then
-      stop = tonumber(stop)
-      if stop < 0 then
-        stop = arrsize + stop
-      end
-    else
-      stop = arrsize
-    end
-
+    local start, stop = _slice_range(#arr, inmap.start, inmap.stop)
     local k
     local n = 0
     local accum = {}

@@ -4,11 +4,13 @@ from contextlib import contextmanager
 from functools import partial
 try:
     from http.client import HTTPConnection
+    from http.client import HTTPException
     from urllib.parse import quote_from_bytes
     from urllib.parse import unquote_to_bytes
     from urllib.parse import urlencode
 except ImportError:
     from httplib import HTTPConnection
+    from httplib import HTTPException
     from urllib import quote as quote_from_bytes
     from urllib import unquote as unquote_to_bytes
     from urllib import urlencode
@@ -1684,7 +1686,13 @@ class Cursor(object):
         # cursor goes over one dedicated connection rather than the pool.
         if self._conn is None:
             self._conn = self.protocol.pool.create_http_client()
-        return fn(self.cursor_id, *args, conn=self._conn, **kw)
+        try:
+            return fn(self.cursor_id, *args, conn=self._conn, **kw)
+        except (socket.error, HTTPException):
+            # The cursor was lost with its session. Invalidate it, so the
+            # next command does not quietly reconnect to a fresh session.
+            self.close()
+            raise
 
     def __iter__(self):
         if not self._initialized and not self._valid:
@@ -1706,11 +1714,13 @@ class Cursor(object):
         return self._valid
 
     def step(self, **kw):
-        self._valid = self._cmd(self.protocol.cur_step, **kw)
+        if self._valid:
+            self._valid = self._cmd(self.protocol.cur_step, **kw)
         return self._valid
 
     def step_back(self, **kw):
-        self._valid = self._cmd(self.protocol.cur_step_back, **kw)
+        if self._valid:
+            self._valid = self._cmd(self.protocol.cur_step_back, **kw)
         return self._valid
 
     def key(self, step=False, **kw):
@@ -1748,13 +1758,13 @@ class Cursor(object):
             return kv
 
     def close(self):
-        # Closing the connection also frees the cursor on the server.
-        deleted = self._valid and self._cmd(self.protocol.cur_delete)
+        # Closing the connection frees the cursor on the server.
+        closed = self._valid
         self._valid = False
         if self._conn is not None:
             self._conn.close()
             self._conn = None
-        return deleted
+        return closed
 
     def __next__(self):
         if not self._valid:
@@ -1762,7 +1772,7 @@ class Cursor(object):
         kv = self._cmd(self.protocol.cur_get, step=True,
                        decode_value=self._decode_values)
         if kv is None:
-            self._valid = False
+            self.close()
             raise StopIteration
         return kv
     next = __next__

@@ -175,20 +175,9 @@ class SignalQueue(object):
                 if ok:
                     key = self.client.cur_get_key(self.cursor_id, conn=conn)
                     if key is not None and self._match(key, prefix):
-                        break
-
-            resp = self.client.cur_seize(self.cursor_id, decode_value=False,
-                                         conn=conn)
-        if resp is None:
-            return
-        key, value = resp
-        if not self._match(key, prefix):
-            # The item under the cursor was consumed before we could seize it
-            # and the cursor advanced past the end of the queue keys. Restore
-            # the record we mistakenly seized.
-            self.client.set(key, value, db=self.db, encode_value=False)
-            return
-        return self.client.decode_value(value)
+                        # Seize by key. If another consumer took the item
+                        # first, cur_seize would take the record after it.
+                        return self.client.seize(key, self.db, conn=conn)
 
     def flush(self):
         keys = self.client.match_prefix(self.key + ':', db=self.db)

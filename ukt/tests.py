@@ -4,6 +4,7 @@ import datetime
 import functools
 import os
 import pickle
+import socket
 import sys
 import tempfile
 import threading
@@ -535,7 +536,23 @@ class TestCursor(BaseTestCase):
         self.assertFalse(c.close())
         self.assertTrue(c.key() is None)
 
-        # A closed cursor can be repositioned.
+        # A closed cursor can be repositioned. Iterating to the end closes it.
+        self.assertTrue(c.jump('k3'))
+        self.assertEqual(list(c), [('k3', 'v3'), ('k4', 'v4')])
+        self.assertTrue(c._conn is None)
+
+    def test_cursor_connection_lost(self):
+        c = self.db.cursor()
+        self.assertTrue(c.jump())
+        c._conn.sock.shutdown(socket.SHUT_RDWR)
+
+        # The cursor is invalid until the next jump, rather than quietly
+        # reconnecting to a fresh session.
+        self.assertRaises(socket.error, c.step)
+        self.assertFalse(c.is_valid())
+        self.assertFalse(c.step())
+        self.assertTrue(c.key() is None)
+
         self.assertTrue(c.jump('k3'))
         self.assertEqual(list(c), [('k3', 'v3'), ('k4', 'v4')])
 
@@ -1933,10 +1950,12 @@ class TestLuaContainers(BaseLuaTestCase):
         self.assertEqual(self.db['p1:00'], 'i3')
         self.assertEqual(self.db['p1:03'], 'i6')
 
-        # A negative start before the head is clamped.
+        # Bounds past either end are clamped.
         self.assertEqual(l.unpack(-20, 2, 'p2:'), 2)
         self.assertEqual(self.db.get_bulk(['p2:0000', 'p2:0001']),
                          {'p2:0000': 'i0', 'p2:0001': 'i1'})
+        self.assertEqual(l.unpack(8, 20, 'p3:'), 2)
+        self.assertEqual(self.db.match_prefix('p3:'), ['p3:0000', 'p3:0001'])
 
     def test_list_pack(self):
         l = self.db.List('l1')
@@ -2573,7 +2592,8 @@ class TestLuaSchedule(BaseTestCase):
 
 
 class TestSignalQueue(BaseTestCase):
-    server_kwargs = {'database': '%'}
+    lua_script = os.path.join(BaseTestCase.lua_path, 'kt.lua')
+    server_kwargs = {'database': '%', 'server_args': ['-scr', lua_script]}
 
     def test_signal_queue(self):
         sq = self.db.SignalQueue('sq')
@@ -2607,6 +2627,28 @@ class TestSignalQueue(BaseTestCase):
         ok, _ = sq.produce('item1')
         self.assertTrue(ok)
         self.assertEqual(sq.consume(wait=1), 'item1')
+        db.close_all()
+
+    def test_signal_queue_lost_race(self):
+        # Another consumer takes the item after this one reads its key. The
+        # record that sorts after it must be left alone.
+        db = KyotoTycoon(self._server.host, self._server.port)
+        sq = db.SignalQueue('sq')
+        ok, _ = sq.produce('item1')
+        self.assertTrue(ok)
+        db.set('szz', 'other', expire_time=60)
+        xt = db.expire_time('szz')
+
+        cur_get_key = db.cur_get_key
+        def cur_get_key_and_steal(*args, **kw):
+            key = cur_get_key(*args, **kw)
+            self.db.remove(key)
+            return key
+        db.cur_get_key = cur_get_key_and_steal
+
+        self.assertTrue(sq.consume(wait=1) is None)
+        self.assertEqual(db.get('szz'), 'other')
+        self.assertEqual(db.expire_time('szz'), xt)
         db.close_all()
 
 

@@ -757,8 +757,9 @@ Kyoto Tycoon client
         writing to the cursor.
 
     Create a helper for working with the database using the cursor interface.
-    Each cursor uses its own connection to the server until
-    :py:meth:`~Cursor.close` is called.
+    Each cursor uses its own connection to the server, which is closed by
+    :py:meth:`~Cursor.close` or by iterating to the end. If the connection
+    fails, the cursor is invalid until the next jump.
 
     .. py:method:: jump(key=None)
 
@@ -1530,7 +1531,8 @@ All exceptions can be imported from ``ukt``.
 .. py:exception:: ServerConnectionError
 
     A binary protocol connection failed while reading or writing. Failures
-    while connecting, and on the HTTP API, raise the underlying socket error.
+    while connecting raise the underlying socket error. Failures on the HTTP
+    API raise the socket error or an ``http.client.HTTPException``.
 
 .. py:exception:: ServerTimeoutError
 
